@@ -1,0 +1,152 @@
+---
+title: "HW3.Rmd"
+author: "Mike Cai"
+date: "2024-05-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(quantmod)
+library(tseries)
+library(forecast)
+library(data.table)
+library(readxl)
+library(ggplot2); theme_set(theme_grey())
+library(stats)
+```
+
+## 1) Problem 7.2
+
+```{r}
+df <- read_excel("Chapter7_Exercises_Data.xls", sheet=1)
+setnames(df, c('date', 'unemployed'))
+
+ggplot(df, aes(x=date)) +
+  geom_line(aes(y=unemployed), color='green') +
+  ggtitle('Unemployed Persons', '1989-2012') +
+  ylab('Unemployed (thousands)') +
+  xlab('Date')
+
+df_acf <- acf(df$unemployed, main="Unemployment - ACF")
+df_pacf <- pacf(df$unemployed, main="Unemployment - PACF")         
+```
+
+The ACF plot shows high persistence, with the persistence parameter at 0.9906. Since it decays downward this suggests an autoregressive process. The PACF shows a significant spike at lag 1 with the same value at 0.9906 and then approximately zero afterwards. The PACF and ACF plots suggest an AR(1) process, but since the persistence parameter is so close to 1, we should also consider whether the process is covariance stationary in the first place (Looking at the time series plot, it is not). Thus, autoregressive model may not be a suitable model to explain the dependence of the series here. 
+
+## 2) Problem 7.5
+
+```{r}
+ar_coef <- c(0.3, 0.7)
+n <- 100
+innovations <- rnorm(n, mean = 0, sd = 1) 
+initial_values <- c(0, 0)
+ar_simulated <- stats::filter(innovations, filter = ar_coef, method = "recursive")
+ar_simulated <- c(initial_values, ar_simulated)
+plot(ar_simulated, type = "l")
+acf(ar_simulated)
+pacf(ar_simulated)
+```
+
+
+```{r}
+ar.sim<-arima.sim(model=list(ar=c(-0.3,-0.7)),n=100, sd = 1)
+par(mfrow=c(3,1))
+plot(ar.sim)
+acf(ar.sim)
+pacf(ar.sim)
+```
+
+The first model exhibits non-stationarity in its covariance, while the second model demonstrates covariance stationarity. In the first model, the autocorrelation function gradually decreases but becomes statistically significant after the seventeenth lag.
+
+In contrast, the second model displays an irregular pattern in its autocorrelation, with most lags being statistically insignificant. This applies to both the ACF and the partial autocorrelation function (PACF). The PACF's autocorrelations become statistically insignificant quickly after the second lag, suggesting that the model's autocorrelations are primarily due to short-term dependencies.
+
+# 3) Problem 7.6
+
+```{r}
+p3 <- read_excel("Chapter7_Exercises_Data.xls", sheet = "Exercise 6")
+names(p3)<- c ("date", "housing", "housing_inflation", "transportation", "transportation_inflation")
+
+p3 <- na.omit(p3)
+
+
+housing_inflation_ts <- ts(p3$housing_inflation, start = 1968, end= 2011, freq = 1)
+
+transportation_inflation_ts <- ts(p3$transportation_inflation, start = 1968, end= 2011, freq = 1)
+
+```
+
+```{r}
+#Plot
+ts.plot(housing_inflation_ts)
+ts.plot(transportation_inflation_ts)
+
+```
+
+```{r}
+acf(housing_inflation_ts, main = "Housing Inflation ACF")
+pacf(housing_inflation_ts, main = "Housing Inflation PACF")
+```
+
+```{r}
+acf(transportation_inflation_ts, main = "Transportation Inflation ACF")
+pacf(transportation_inflation_ts, main = "Transportation Inflation PACF")
+```
+
+
+Housing inflation rates can be modeled as an AR(2) process because the PACF shows two spikes at lags 1 and 2, while the ACFs decay to zero. However, the trasnsportation inflation rate PACF shows only shows one spike at lag 1, suggesting an AR(1) process instead.
+
+## 4) Problem 7.8
+
+```{r}
+#import data
+ex8 <- read_excel("Chapter7_exercises_data.xls", sheet = "Exercise 8")
+colnames(ex8) <- c('date', 'cpi_all_item', 'inflation_all_item', 'cpi_less_food_and_energy', 'inflation_less_food_and_energy')
+#convert to time series
+inflation1_ts <- ts(ex8$inflation_all_item, start = 1958, end= 2011, freq = 1)
+inflation2_ts <- ts(ex8$inflation_less_food_and_energy, start = 1958, end= 2011, freq = 1)
+```
+
+```{r}
+#compare inflation time series
+tsdisplay(inflation1_ts, main = "Inflation All Item Time Series")
+tsdisplay(inflation2_ts, main = "Inflation Less Food and Energy Time Series")
+```
+
+The acf/pacf plot for "inflation less food and energy" has spikes that goes beyond the bands. This suggests higher autocorrelation, meaning that the time series has a stronger relationship with its past values, making it easier to predict. Because of this, "inflation all item" is more difficult to predict.
+
+```{r}
+#Based on the acf (slow decay) and pacf (3 significant spikes), we should use an AR(3) process to estimate both inflation rate models.
+ar3_inflation1_ts <- arima(inflation1_ts, order = c(3, 0, 0))
+ar3_inflation1_ts
+ar3_inflation2_ts <- arima(inflation2_ts, order = c(3, 0, 0))
+ar3_inflation2_ts
+```
+
+```{r}
+#calculate 1 and 2-step density forecasts for each inflation rate
+
+#define number of simulations
+nsim <- 500
+#simulate 1 and 2-step ahead forecasts
+inflation1_sim1 <- replicate(nsim, forecast(ar3_inflation1_ts, h = 1)$mean[1])
+inflation1_sim2 <- replicate(nsim, forecast(ar3_inflation1_ts, h = 2)$mean[2])
+inflation2_sim1 <- replicate(nsim, forecast(ar3_inflation2_ts, h = 1)$mean[1])
+inflation2_sim2 <- replicate(nsim, forecast(ar3_inflation2_ts, h = 2)$mean[2])
+
+#calculate densities for 1 and 2-step ahead forecasts
+inflation1_density1 <- density(inflation1_sim1)
+inflation1_density2 <- density(inflation1_sim2)
+inflation2_density1 <- density(inflation2_sim1) 
+inflation2_density2 <- density(inflation2_sim2)
+
+#plot the densities
+par(mfrow = c(2, 2))
+plot(inflation1_density1, main = "Inflation All Item \n 1-Step Ahead Density Forecast")
+plot(inflation1_density2, main = "Inflation All Item \n 2-Step Ahead Density Forecast")
+plot(inflation2_density1, main = "Inflation Less Food and Energy \n 1-Step Ahead Density Forecast")
+plot(inflation2_density2, main = "Inflation Less Food and Energy \n 2-Step Ahead Density Forecast")
+```
+

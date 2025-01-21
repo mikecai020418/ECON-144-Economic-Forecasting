@@ -1,0 +1,123 @@
+---
+title: "Econ 144 HW5"
+author: "Daniel Wang"
+date: "2024-05-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(tseries)
+library(forecast)
+library(fpp3)
+library(seasonal)
+library(fable)
+library(stats)
+require(graphics)
+library(readxl)
+library(car)
+library(lmtest)
+library(readr)
+library(dynlm)
+library(fma)
+library(TSA)
+library(timeSeries)
+library(strucchange)
+library(vars)
+library(lmtest)
+library(dlnm)
+library(tidyverse)
+library(expsmooth)
+library(fpp2)
+library(Quandl)
+
+```
+
+
+
+# 4. Problem 12.2
+
+## (a)
+```{r}
+gasoline_ts <- ts(us_gasoline$Barrels, frequency=52, start = c(1991, 6))
+```
+
+```{r}
+# lambda of Box-Cox transformation
+lambda_gasoline <- BoxCox.lambda(gasoline_ts)
+
+# select the number of Fourier pairs
+min.AIC <- Inf
+K_min.Aic <- 0
+
+for(num in c(1:6)){
+  gasoline_tslm <- tslm(
+    gasoline_ts ~ trend + fourier(gasoline_ts, K = num),
+    lambda = lambda_gasoline
+    )
+  
+  AIC <- CV(gasoline_tslm)["AIC"]
+  
+  if(AIC < min.AIC){
+    min.AIC <- AIC
+    K_min.Aic <- num
+  }
+}
+
+# Make harmonic regression model
+gasoline_tslm <- tslm(
+  gasoline_ts ~ trend + fourier(gasoline_ts, K = K_min.Aic),
+  lambda = lambda_gasoline
+  )
+
+autoplot(gasoline_ts) + autolayer(gasoline_tslm$fitted.values)
+
+# Fit dynamic regression model
+gasoline_autoarima <- auto.arima(
+  gasoline_ts,
+  lambda = lambda_gasoline,
+  xreg = cbind(
+    Fourier = fourier(gasoline_ts, K = K_min.Aic),
+    time = time(gasoline_ts)
+    )
+)
+
+gasoline_autoarima
+
+autoplot(gasoline_ts) + autolayer(gasoline_autoarima$fitted)
+```
+
+
+The dynamic harmonic regression model fits the data better than the harmonic regression model because it is able to capture changes in the seasonality and trend over time.
+
+
+## (b)
+```{r}
+checkresiduals(gasoline_autoarima)
+checkresiduals(gasoline_tslm)
+
+```
+
+The residuals from the dynamic harmonic regression are almost all positive and there are several significant lags in the ACF plot of the residuals, but the autocorrelation is generally quite small. The residuals do not have constant volatility over time. For the harmonic regression model, the residuals are clearly not white noise as they display both trend and changing volatility. The ACFs decay extremely slowly starting from around 0.7. 
+
+
+## (c)
+We could also try models like ARIMA and ETS, although they might not perform as well on high frequency like weekly data with complex seasonal patterns. We generally used them for monthly or quarterly data.
+```{r}
+# Fit ARIMA model
+fit_arima <- auto.arima(gasoline_ts)
+summary(fit_arima)
+checkresiduals(fit_arima)
+
+# Fit ETS model
+fit_ets <- ets(gasoline_ts)
+summary(fit_ets)
+checkresiduals(fit_ets)
+
+
+autoplot(gasoline_ts, ylab = "Gas Supply (Weekly)",main= "Other Models") +  autolayer(fitted(fit_arima)) + autolayer(fitted(fit_ets))
+```
+

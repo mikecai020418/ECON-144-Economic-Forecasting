@@ -1,0 +1,93 @@
+---
+title: "HW 5"
+author: "Tiffany Mok"
+date: "2024-05-25"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+rm(list=ls()) #this command clears the environment
+
+setwd("/Users/tiffanymok/Documents/School Spring Quarter 2024/ECON 144")
+
+library(readxl)
+library(forecast)
+library(rugarch)
+```
+
+
+# 1) Problem 14.3
+```{r, tidy = TRUE}
+#import data
+data <- read_excel("Chapter14_exercises_data.xls", sheet = "Exercise 3, 4, 10")
+sp500_ts <- ts(data$`Adj Close`, start = 2000, freq = 252)
+plot(sp500_ts)
+```
+There is high volatility around the early 2000s and 2008, which was makes sense because of the dotcom bubble and financial crisis. Historically, these were periods of instability with large movements in stock prices. There are calmer periods of lower volatility as well, such as from 2003-2007.
+
+```{r, tidy = TRUE}
+#get daily returns
+returns <- diff(log(sp500_ts))
+tsdisplay(returns, lag.max = 40)
+returns_sq <- returns^2
+tsdisplay(returns_sq, lag.max = 40)
+```
+The returns data seem to exhibit white noise, with the acf/pacf plots not really showing decay or significant autocorrelation. The amplitude of 0.05 is quite low as well. After squaring the data and looking at the acf/pacf plots, there is decay and high persistence in the ACF, with spikes cutting off at lag 14 in the PACF. I will try fitting an ARCH(14). 
+
+```{r, tidy = TRUE}
+model=ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(14, 0)),
+  mean.model = list(armaOrder = c(2, 2), include.mean = TRUE),
+  distribution.model = "sstd")
+
+#sanity check: explore the model parameters
+model@model$pars
+
+#fit the model to the data
+modelfit=ugarchfit(spec=model,data=returns)
+modelfit
+plot(modelfit, which = 10)
+plot(modelfit, which = 11)
+```
+Looking at the ACF of squared standardized residuals, it seems that the values stay within the bands, meaning dynamics have been wiped out. This model is good for fitting the data.
+
+```{r, tidy = TRUE}
+#After comparing AIC/BICs for various GARCH combinations, I decided to go with an GARCH(2,1) model, which had the lowest value.
+model1=ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(2, 1)),
+  mean.model = list(armaOrder = c(2, 2), include.mean = TRUE),
+  distribution.model = "sstd")
+
+#sanity check: explore the model parameters
+model1@model$pars
+
+#fit the model to the data
+modelfit1=ugarchfit(spec=model1,data=returns)
+modelfit1
+
+plot(modelfit1, which = 10)
+plot(modelfit1, which = 11)
+```
+The GARCH model fits equally well since there are generally no spikes. It also has a slightly lower AIC/BIC. I will prefer the GARCH model due to having less parameters compared to the ARCH model.
+
+# 2) Problem 14.4
+```{r, tidy = TRUE}
+#forecast
+modelfor = ugarchforecast(modelfit1, data = NULL, n.ahead = 2, n.roll = 0, out.sample = 0)
+plot(modelfor, which = 1)
+
+#get forecasted volatility
+forecasted_volatility <- sigma(modelfor)
+
+#get 95% prediction intervals for 1 and 2 step ahead forecasts
+lower_1 <- -1.96 * forecasted_volatility[1]
+upper_1 <- 1.96 * forecasted_volatility[1]
+lower_2 <- -1.96 * forecasted_volatility[2]
+upper_2 <- 1.96 * forecasted_volatility[2]
+
+#print 95% prediction intervals
+cat("One-Step Ahead - Lower Bound:", lower_1, "Upper Bound:", upper_1, "\n")
+cat("Two-Step Ahead - Lower Bound:", lower_2, "Upper Bound:", upper_2, "\n")
+```
+
+

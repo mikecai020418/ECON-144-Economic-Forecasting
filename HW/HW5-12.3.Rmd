@@ -1,0 +1,323 @@
+---
+title: "HW5"
+author: "Mike Cai"
+date: "2024-05-30"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+library(fpp2)
+library(fpp3)
+library(vars)
+library(xlsx)
+library(readxl)
+library(forecast)
+library(rugarch)
+library(tseries)
+library(ggplot2)
+library(tseries)
+library(forecast)
+library(fpp3)
+library(seasonal)
+library(fable)
+library(stats)
+require(graphics)
+library(readxl)
+library(car)
+library(lmtest)
+library(readr)
+library(dynlm)
+library(fma)
+library(TSA)
+library(timeSeries)
+library(strucchange)
+library(vars)
+library(lmtest)
+library(dlnm)
+library(tidyverse)
+library(expsmooth)
+library(fpp2)
+library(Quandl)
+```
+
+# 1) Problem 14.3
+```{r, tidy = TRUE, warning=FALSE}
+#import data
+data <- read_excel("Chapter14_exercises_data.xls", sheet = "Exercise 3, 4, 10")
+sp500_ts <- ts(data$`Adj Close`, start = 2000, freq = 252)
+plot(sp500_ts)
+```
+There is noticeable high volatility around the early 2000s and 2008, corresponding to the dotcom bubble and the financial crisis, respectively. These periods were marked by significant instability and substantial fluctuations in stock prices. In contrast, there were also calmer periods of lower volatility, such as the stretch from 2003 to 2007.
+
+```{r, tidy = TRUE, warning=FALSE}
+#get daily returns
+returns <- diff(log(sp500_ts))
+tsdisplay(returns, lag.max = 40)
+returns_sq <- returns^2
+tsdisplay(returns_sq, lag.max = 40)
+```
+The returns data seem to exhibit white noise, with the acf/pacf plots not really showing decay or significant autocorrelation. The amplitude of 0.05 is quite low as well. After squaring the data and looking at the acf/pacf plots, there is decay and high persistence in the ACF, with spikes cutting off at lag 14 in the PACF. I will try fitting an ARCH(14). 
+
+```{r, tidy = TRUE, warning=FALSE}
+model=ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(14, 0)),
+  mean.model = list(armaOrder = c(2, 2), include.mean = TRUE),
+  distribution.model = "sstd")
+
+#sanity check: explore the model parameters
+model@model$pars
+
+#fit the model to the data
+modelfit=ugarchfit(spec=model,data=returns)
+modelfit
+plot(modelfit, which = 10)
+plot(modelfit, which = 11)
+```
+Looking at the ACF of squared standardized residuals, it seems that the values stay within the bands, meaning dynamics have been wiped out. This model is good for fitting the data.
+
+```{r, tidy = TRUE, warning=FALSE}
+#After comparing AIC/BICs for various GARCH combinations, I decided to go with an GARCH(2,1) model, which had the lowest value.
+model1=ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(2, 1)),
+  mean.model = list(armaOrder = c(2, 2), include.mean = TRUE),
+  distribution.model = "sstd")
+
+#sanity check: explore the model parameters
+model1@model$pars
+
+#fit the model to the data
+modelfit1=ugarchfit(spec=model1,data=returns)
+modelfit1
+
+plot(modelfit1, which = 10)
+plot(modelfit1, which = 11)
+```
+The GARCH model fits equally well since there are generally no spikes. It also has a slightly lower AIC/BIC. I will prefer the GARCH model due to having less parameters compared to the ARCH model.
+
+# 2) Problem 14.4
+```{r, tidy = TRUE, warning=FALSE}
+#forecast
+modelfor = ugarchforecast(modelfit1, data = NULL, n.ahead = 2, n.roll = 0, out.sample = 0)
+plot(modelfor, which = 1)
+
+#get forecasted volatility
+forecasted_volatility <- sigma(modelfor)
+
+#get 95% prediction intervals for 1 and 2 step ahead forecasts
+lower_1 <- -1.96 * forecasted_volatility[1]
+upper_1 <- 1.96 * forecasted_volatility[1]
+lower_2 <- -1.96 * forecasted_volatility[2]
+upper_2 <- 1.96 * forecasted_volatility[2]
+
+#print 95% prediction intervals
+cat("One-Step Ahead - Lower Bound:", lower_1, "Upper Bound:", upper_1, "\n")
+cat("Two-Step Ahead - Lower Bound:", lower_2, "Upper Bound:", upper_2, "\n")
+```
+
+# 3) Problem 14.5
+```{r}
+cpi <- read_excel("Chapter14_exercises_data.xls", sheet = "Exercise 5a")
+gdp <- read_excel("Chapter14_exercises_data.xls", sheet = "Exercise 5b")
+inf <- cpi$`INFLATION RATE`[2:nrow(cpi)]
+gdp_grow <- gdp$`GDP GROWTH`[2:nrow(gdp)]
+mean(inf)
+mean(gdp_grow)
+plot(inf, type="l")
+plot(gdp_grow, type = "l")
+adf.test(cpi$`INFLATION RATE`[2:nrow(cpi)])
+adf.test(gdp$`GDP GROWTH`[2:nrow(gdp)])
+auto.arima(cpi$"INFLATION RATE"[2:nrow(cpi)]) #ARIMA order (4,1,1)
+auto.arima(gdp$"GDP GROWTH"[2:nrow(gdp)]) #ARIMA order (2,0,2)
+diff_inf<- diff(inf)
+```
+
+
+```{r}
+#Model for inflation rate
+model <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(3, 3)),
+  mean.model = list(armaOrder = c(4, 1), include.mean = TRUE),
+  distribution.model = "sstd"
+)
+
+# Sanity check: explore the model parameters
+print(model@model$pars)
+
+# Fit the model to the data
+modelfit1 <- ugarchfit(spec = model, data = diff_inf)
+print(modelfit1)
+plot(modelfit1, which = 10)
+plot(modelfit1, which = 11)
+
+modelfor = ugarchforecast(modelfit1, data = NULL, n.ahead = 2, n.roll = 0, out.sample = 0)
+plot(modelfor, which = 1)
+
+#get forecasted volatility
+forecasted_volatility <- sigma(modelfor)
+
+#One step ahead volatility forecast
+lower_1 <- -1.96 * forecasted_volatility[1]
+upper_1 <- 1.96 * forecasted_volatility[1]
+
+#print 95% prediction intervals
+cat("One-Step Ahead - Lower Bound:", lower_1, "Upper Bound:", upper_1, "\n")
+
+#Model for GDP Growth
+model_2 <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+  mean.model = list(armaOrder = c(2, 2), include.mean = TRUE),
+  distribution.model = "sstd"
+)
+
+# Sanity check: explore the model parameters
+print(model_2@model$pars)
+
+modelfit_2 <- ugarchfit(spec = model, data = gdp_grow)
+print(modelfit_2)
+plot(modelfit_2, which = 10)
+plot(modelfit_2, which = 11)
+
+modelfor = ugarchforecast(modelfit1, data = NULL, n.ahead = 2, n.roll = 0, out.sample = 0)
+plot(modelfor, which = 1)
+
+forecasted_volatility <- sigma(modelfor)
+
+#One step ahead volatility forecast
+lower_1 <- -1.96 * forecasted_volatility[1]
+upper_1 <- 1.96 * forecasted_volatility[1]
+
+#95% prediction intervals
+cat("One-Step Ahead - Lower Bound:", lower_1, "Upper Bound:", upper_1, "\n")
+```
+# 4. Problem 12.2
+
+## (a)
+```{r}
+gasoline_ts <- ts(us_gasoline$Barrels, frequency=52, start = c(1991, 6))
+```
+
+```{r}
+# lambda of Box-Cox transformation
+lambda_gasoline <- BoxCox.lambda(gasoline_ts)
+
+# select the number of Fourier pairs
+min.AIC <- Inf
+K_min.Aic <- 0
+
+for(num in c(1:6)){
+  gasoline_tslm <- tslm(
+    gasoline_ts ~ trend + fourier(gasoline_ts, K = num),
+    lambda = lambda_gasoline
+    )
+  
+  AIC <- CV(gasoline_tslm)["AIC"]
+  
+  if(AIC < min.AIC){
+    min.AIC <- AIC
+    K_min.Aic <- num
+  }
+}
+
+# Make harmonic regression model
+gasoline_tslm <- tslm(
+  gasoline_ts ~ trend + fourier(gasoline_ts, K = K_min.Aic),
+  lambda = lambda_gasoline
+  )
+
+autoplot(gasoline_ts) + autolayer(gasoline_tslm$fitted.values)
+```
+
+
+The dynamic harmonic regression model fits the data better than the harmonic regression model because it is able to capture changes in the seasonality and trend over time.
+
+
+## (b)
+```{r}
+# checkresiduals(gasoline_autoarima)
+checkresiduals(gasoline_tslm)
+
+```
+
+The residuals from the dynamic harmonic regression are almost all positive and there are several significant lags in the ACF plot of the residuals, but the autocorrelation is generally quite small. The residuals do not have constant volatility over time. For the harmonic regression model, the residuals are clearly not white noise as they display both trend and changing volatility. The ACFs decay extremely slowly starting from around 0.7. 
+
+
+## (c)
+We could also try models like ARIMA and ETS, although they might not perform as well on high frequency like weekly data with complex seasonal patterns. We generally used them for monthly or quarterly data.
+```{r}
+# Fit ARIMA model
+fit_arima <- auto.arima(gasoline_ts)
+summary(fit_arima)
+checkresiduals(fit_arima)
+
+# Fit ETS model
+fit_ets <- ets(gasoline_ts)
+summary(fit_ets)
+checkresiduals(fit_ets)
+
+
+autoplot(gasoline_ts, ylab = "Gas Supply (Weekly)",main= "Other Models") +  autolayer(fitted(fit_arima)) + autolayer(fitted(fit_ets))
+```
+
+# 5) 12.3
+```{r, warning=FALSE}
+# experiment with retail data.
+# create retail data
+retail <- read.xlsx("retail.xlsx",
+                    sheetIndex = 1,
+                    startRow = 2)
+retail.ts <- ts(retail[,"A3349873A"], 
+                frequency=12, 
+                start=c(1982,4))
+# fit model
+retail_nnetar <- nnetar(retail.ts)
+checkresiduals(retail_nnetar)
+autoplot(retail.ts) + autolayer(retail_nnetar$fitted)
+
+# Produce forecasts
+fc_retail_nnetar <- forecast(retail_nnetar, h = 36)
+autoplot(fc_retail_nnetar)
+
+# test accuracy using future data.
+retail.new <- read.xlsx("8501011.xlsx", 
+                        sheetName = "Data1", 
+                        startRow = 10)
+retail.new.ts <- ts(retail.new[, "A3349873A"],
+                    start = c(1982, 4),
+                    frequency = 12)
+retail.new.test <- subset(
+  retail.new.ts,
+  start = length(retail.ts) + 1
+  )
+
+# test accuracy using future data.
+accuracy(fc_retail_nnetar, retail.new.test)
+```
+Even the the residuals aren't like white nice and were slightly right skewed, it looks like neural network model fitted well to the data.
+
+```{r, warning=FALSE}
+# experiment with ibmclose data.
+ibmclose_nnetar <- nnetar(ibmclose)
+# Produce forecasts
+autoplot(ibmclose) + autolayer(ibmclose_nnetar$fitted)
+checkresiduals(ibmclose_nnetar)
+fc_ibmclose_nnetar <- forecast(ibmclose_nnetar, h=36)
+autoplot(fc_ibmclose_nnetar)
+```
+
+The fitted value looks pretty good and residuals looks like white noise. However, even neural network method yielded naive-method like result in forecast. It looked like there wasn't any rule in lagged values.
+
+```{r, warning=FALSE}
+# experiment with usmelec data.
+usmelec_nnetar <- nnetar(usmelec)
+checkresiduals(usmelec_nnetar)
+autoplot(usmelec) + autolayer(usmelec_nnetar$fitted)
+fc_usmelec_nnetar <- forecast(
+  usmelec_nnetar, h = 12*4
+)
+
+autoplot(fc_usmelec_nnetar)
+```
+
+It looked like neural network model was fitted well to the data.
+

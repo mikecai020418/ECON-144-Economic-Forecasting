@@ -1,0 +1,301 @@
+---
+title: "HW1"
+author: "Mike Cai"
+date: "2024-04-12"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tseries)
+library(forecast)
+library(fpp3)
+library(tseries)
+library(seasonal)
+library(fable)
+library(stats)
+require(graphics)
+library(readxl)
+library(moments)
+```
+
+## Question 3.1
+
+```{r 3.1(a)}
+data = read_excel("Chapter3_exercises_data.xlsx", sheet = "Exercise 1")
+log_RC <- log(data$rpce)
+log_I <- log(data$rdpi)
+Growth_RC <- diff(log_RC)
+Growth_I <- diff(log_I)
+plot(data$date[-1],Growth_RC, type = "l", col = "blue", xlab = "Year", ylab = "Growth Rate (Real Consumption)", main = "Growth Rate of Real Consumption")
+plot(data$date[-1],Growth_I, type = "l", col = "red", xlab = "Year", ylab = "Growth Rate (Income)", main = "Growth Rate of Disposable Income")
+```
+Growth rate of real consumption is less volatile than growth rate of disposable income, probably because the permanent income model relates to this phenomenon by postulating that current and expected future income levels (together lifetime income) drives consumption (expenditure) patterns, but is smoothed over time. So if someone has an increase in income, they will smooth that gain over their lifetime and not spend it proportionally immediately. Thus in this example, one would change their consumption in magnitude less in response to an the income change. This data is evidence of the permanent income hypothesis.
+
+```{r 3.1(b)}
+model <- lm(Growth_RC ~ Growth_I)
+
+# Print the summary of the regression model
+summary(model)
+```
+The estimated linear equation is that Growth of consumption = 0.0022543 + 0.1745175 Growth of Income. This suggests that a disposable income growth expects a positive change in consumption. The t values and p values suggest statistical significance, so at the 95% level income growth appears to positively drive expenditure. This R^2^ score is also very low, meaning that our independent variable of income growth only accounts for about 5% of total variation. Our coefficient of rdpi_growth means that a 1% growth in income is expected to give a 0.17% growth in consumption. Because 0.17% < 1%, this aligns with the permanent income hypothesis.
+
+```{r 3.1(c)}
+Growth_I_lag <- lag(Growth_I)
+lr_growth_lag <- lm(Growth_RC~Growth_I+Growth_I_lag)
+summary(lr_growth_lag)
+```
+With the lagged consumption growth we do see a small increase in the Growth_I coefficient, as well as a positive coefficient for the lag parameter. The actual coefficient of Growth_I_lag means that a 1% increase in income in the previous period is expected to give a 0.08% increase in consumption in the current period. The t values and p values of the intercept and the Growth_I variable remain to suggest significance, but the lagged parameter is just passing by at the 95% significance level. This finding does not present *strong* evidence that last periods growth in income has a significant effect on consumption pattern, which coincides with the permanent income hypothesis. Also, the Adjusted R^2^ rose to 0.062, but this increase is not notably large.
+
+## Question 3.3
+
+```{r 3.3(a）}
+real_gdp_data <- read_excel("Chapter3_exercises_data.xlsx", sheet = "Exercise 3a")
+read_gdp_mean <- mean(real_gdp_data$rgdp)
+
+ggplot(data=real_gdp_data, mapping=aes(date, rgdp)) +
+  geom_line(color='blue', lwd=1) +
+  geom_hline(yintercept=read_gdp_mean, linetype='dashed') +
+  ggtitle('US Real GDP') +
+  xlab('Year') +
+  ylab('RGDP')
+```
+**Definition**: Value of goods and services produced in the US adjusted for inflation.  
+**Periodicity**: Quarters, 1947-2012.  
+**Units**: USD billions chain weighted.  
+**Stationary**: There is a clear upward trend with some small local dips and peaks, so this time series is not first (second) order weakly stationary.
+
+```{r 3.3(b）}
+exchange_rate <- read_excel("Chapter3_exercises_data.xlsx", sheet="Exercise 3b")
+exchange_rate_mean <- mean(exchange_rate$jpy_usd)
+
+ggplot(data=exchange_rate, mapping=aes(DATE, jpy_usd)) +
+  geom_line(color='blue', lwd=1) +
+  geom_hline(yintercept=exchange_rate_mean, linetype='dashed') +
+  ggtitle('Exchange Rate of Yen vs USD') +
+  xlab('Year') +
+  ylab('Rate')
+```
+**Definition**: The value of yen (foreign currency) that is equal to 1 USD.  
+**Periodicity**: Monthly, 1971-01-04 to 2012-06-01.  
+**Units**: Rate of Yen to 1 USD.  
+**Stationary**: There is a clear downward trend with some small and moderate local dips and peaks, so this time series is also not first (second) order weakly stationary.
+
+```{r 3.3(c）}
+maturity_yield <- read_excel("Chapter3_exercises_data.xlsx", sheet="Exercise 3c")
+maturity_yield_mean <- mean(maturity_yield$CMRate10Yr, na.rm=TRUE)
+
+# Removing zero values under assumption that these should be NA.
+maturity_yield[maturity_yield==0] <- NA
+
+ggplot(data=maturity_yield, mapping=aes(DATE, CMRate10Yr)) +
+  geom_line(color='blue', lwd=1) +
+  geom_hline(yintercept=maturity_yield_mean, linetype='dashed') +
+  ggtitle('10-year Treasury Constant Maturity Yield') +
+  xlab('Rate') +
+  ylab('Year')
+```
+**Definition**: Yields on actively traded non-inflation-indexed issues adjusted to constant maturities.  
+**Periodicity**: Daily, 1962-01-02 to 2012-06-07.  
+**Units**: Rate.  
+**Stationary**: This plot is less clear in respect to any trend. Before the mid 1980's there is an upward trend, but after there is a downward trend. There is does not appear to be a meaningful mean of this series nor is there a seemingly constant degree of variance in the cycles. This series is doubtful to be first (second) order weakly stationary.
+
+```{r 3.3(d）}
+unemployment <- read_excel("Chapter3_exercises_data.xlsx", sheet="Exercise 3d")
+unemployment_mean <- mean(unemployment$unemrate)
+
+ggplot(data=unemployment, mapping=aes(DATE, unemrate)) +
+  geom_line(color='blue', lwd=1) +
+  geom_hline(yintercept=unemployment_mean, linetype='dashed') +
+  ggtitle('US Unemployment Rate') +
+  xlab('Year') +
+  ylab('Rate')
+```
+**Definition**: The percent of unemployed people over the labor force. The US Labor force includes those 16 years of age and up, not in institutions, not on active military duty, residing in the United States.  
+**Periodicity**: Monthly, 1948-01-01 to 2012-05-01.  
+**Units**: Rate.  
+**Stationary**: This plot has an overall upward trend, but does in fact fluctuate about the mean more than the previous series. It is  unclear if this is first order weakly stationary. Since the variances are more obviously not constant, I would be confident enough to at least claim that it is not second order weakly stationary. 
+
+## Question 3.1
+
+```{r 3.5(a)}
+data = read_excel("3.5.xlsx")
+data
+
+plot(data$Date,data$GDP, type = "l", col = "blue", xlab = "Date", ylab = "GDP", main = "GDP trend")
+```
+The underlying stochastic process is not weakly stationary. The upward trend indicates that the process must have different means in different periods of time, so that it is not first order stationary.
+
+```{r 3.5(b)}
+# Calculate the growth rate of nominal GDP
+data$g1t <- 100 * ((data$GDP-lag(data$GDP)) / lag(data$GDP))
+# Print the updated table with the new GDP growth column
+print(data)
+```
+```{r 3.5(c)}
+plot(data$Date, data$`ln(GDP)`, type = "l", col = "blue", xlab = "Date", ylab = "ln(GDP)", main = "ln GDP trend")
+```
+The logarithmic transformation helps to stabilize the variance. The figures above show that the log transformation does not affect the trending behavior of the GDP series, and therefore, yt is not first order stationary but it is smoother than the original GDP series.
+```{r 3.5(d)}
+# Calculate the growth rate of nominal GDP
+data$g2t <- 100 * ((data$`ln(GDP)`-lag(data$`ln(GDP)`)))
+# Print the updated table with the new GDP growth column
+print(data)
+```
+From the third and the fifth columns of the table, we observe that there are not significant differences between g1t and g2t, so that the log-difference used in d. is a good approximation to compute growth rates.
+
+
+## Question 3.7
+
+```{r 3.7(a)}
+Data <- read_excel("Chapter3_exercises_data.xlsx", sheet="Exercise 7")
+Data$pt <- log(Data$`SP500 Index`)
+Data$Daily_return <- (Data$pt - lag(Data$pt))
+Data #Daily return shown as the fourth column of data 
+```
+```{r 3.7(b)}
+
+# Compute sample moments
+mean_return <- mean(Data$Daily_return, na.rm = TRUE)
+variance_return <- var(Data$Daily_return, na.rm = TRUE)
+skewness_return <- moments::skewness(Data$Daily_return, na.rm = TRUE)
+kurtosis_return <- moments::kurtosis(Data$Daily_return, na.rm = TRUE)
+
+# Print the computed sample moments
+cat("Mean of Daily Returns:", mean_return, "\n")
+cat("Variance of Daily Returns:", variance_return, "\n")
+cat("Skewness of Daily Returns:", skewness_return, "\n")
+cat("Kurtosis of Daily Returns:", kurtosis_return, "\n")
+
+# Plot histogram of Daily returns
+hist(Data$Daily_return, breaks = 30, main = "Histogram of Daily Returns", xlab = "Daily Returns")
+```
+
+```{r 3.7(c)}
+# Create lagged versions of Daily Return
+Data$Rt_minus_1 <- lag(Data$Daily_return)
+Data$Rt_minus_2 <- lag(Data$Rt_minus_1)
+Data$Rt_minus_3 <- lag(Data$Rt_minus_2)
+Data$Rt_minus_4 <- lag(Data$Rt_minus_3)
+
+# Plot Rt against Rt−1, Rt−2, Rt−3, and Rt−4
+plot(Data$Rt_minus_1, Data$Daily_return, main = "Rt vs. Rt−1", xlab = "Rt−1", ylab = "Rt", col = "blue")
+plot(Data$Rt_minus_2, Data$Daily_return, main = "Rt vs. Rt−2", xlab = "Rt−2", ylab = "Rt", col = "green")
+plot(Data$Rt_minus_3, Data$Daily_return, main = "Rt vs. Rt−3", xlab = "Rt−3", ylab = "Rt", col = "red")
+plot(Data$Rt_minus_4, Data$Daily_return, main = "Rt vs. Rt−4", xlab = "Rt−4", ylab = "Rt", col = "purple")
+```
+I cannot discern any pattern in any of the four graphs. 
+
+### Section 2: Forecasting: Principles and Practice
+
+## Question 2.8
+```{r 2.8(a) Total Private}
+private = us_employment %>%
+  filter(Title == "Total Private") %>%
+  ungroup()
+
+autoplot(private, Employed) + labs(title="Total Private Employed")
+gg_season(private, Employed) + labs(title="Total Private Employed")
+gg_subseries(private, Employed) + labs(title="Total Private Employed")
+gg_lag(private, Employed) + labs(title="Total Private Employed")
+autoplot(ACF(private, Employed)) + labs(title="Total Private Employed")
+```
+By focusing on the first graph (autoplot), we indeed could find out a strong upward trend and some seasonality, as it fluctuates regularly. This is also proven by looking at the ACF plot. However, by looking at the seasonal plot, the curves are quite flat, which means there might not be strong seasonality appearing. For employment data, this pattern might be good. We can also see that the fluctuation in autoplot is small, which corresponds to this. It seems that there is some cyclicity here, as the line indeed goes up and down for some non-fixed period in the autograph. We may also see that this time series data is in monthly frequency. One unusual period could be 2008-2010, when there is a big decrease in the Employed variable. Something might happen at that period, such as the famous financial crisis.
+
+```{r 2.8(b) Bricks}
+autoplot(aus_production, Bricks) + labs(title = "Bricks")
+gg_season(aus_production, Bricks) + labs(title = "Bricks")
+gg_subseries(aus_production, Bricks) + labs(title = "Bricks")
+gg_lag(aus_production, Bricks) + labs(title = "Bricks")
+autoplot(ACF(aus_production, Bricks)) + labs(title = "Bricks")
+```
+By looking at the autoplot graph, we indeed can discover seasonality of the time series within years. We can also find out cyclicity, as the curve goes up and down in unfixed time periods. Linear trends in this case might not be appropriate, but quadratic trends might be useful. We can also find out that this series is in quarterly frequency. By examining the seasonal plot and the subseries plot, we can see that the Bricks variable indeed changes in some regular way throughout quarters in a year. For example, the number of Bricks in the second and third quarter is higher than the rest. This may imply a higher demand of bricks during that period. These are all signs of seasonal patterns. Periods 1973-1975 and 1982-1983 are quire unusual, because the number of Bricks drop at a very high degree in these periods.
+
+```{r 2.8(c) Hare}
+autoplot(pelt, Hare) + labs(title = "Hare")
+gg_subseries(pelt, Hare) + labs(title = "Hare")
+gg_lag(pelt, Hare) + labs(title = "Hare")
+autoplot(ACF(pelt, Hare)) + labs(title = "Hare")
+```
+Due to some reasons, gg_season() doesn’t work here, but we can also make conclusions on seasonality based on the other four graphs. By checking the autograph and the lag plot, it’s hard to say that any seasonality exists. This mighe be because of the time frequency we choose. Yearly data might not be satisfying. It’s also very hard to determine a trend, as it might only be a flat line. But it seems like some cyclicity exists. It’s quite a common pattern that number of Hare increases a lot in a short period then decreases a lot over time. This might relate to the habit pattern of Hare. It seems like there are no unusual years, as a big increase and decrease in number of Hare is a common pattern.
+
+```{r 2.8(d) Cost}
+H02 = PBS %>%
+  filter(ATC2 == "H02") %>%
+  ungroup()
+
+autoplot(H02, Cost) + labs(title = "H02 Cost")
+gg_season(H02, Cost) + labs(title = "H02 Cost")
+gg_subseries(H02, Cost) + labs(title = "H02 Cost")
+autoplot(ACF(H02, Cost)) + labs(title = "H02 Cost")
+```
+Because our dataset has more than 1 index/group, gg_lag() cannot handle this case. However, we can still use the rest 4 graphs to figure out if seasonality presents in our time series data. Since the data has been grouped into 4 groups, we should see the patterns of each of them. We can see that our data is in monthly frequency. By checking the autograph, we can see strong seasonality in three of them except the group General/Co-Payments. Indeed, as we check the seasonal plot, this group has the most chaotic curves, which doesn’t show evidence of seasonality. All of them don’t have a clear sign of cyclicity, and it’s hard to determine the trend for all of them except the group of Concessional/Co-payments, which may have an upward trend. This series tells us that costs among different groups are different, which is a reasonable conclusion. One unusual thing is that the volatility for 2 groups of Concessional are higher than the other two groups. This might be related to the concession type.
+
+```{r 2.8(e) Barrels}
+autoplot(us_gasoline, Barrels) + labs(title = "Barrels of Oil")
+gg_season(us_gasoline, Barrels) + labs(title = "Barrels of Oil")
+gg_subseries(us_gasoline, Barrels) + labs(title = "Barrels of Oil")
+gg_lag(us_gasoline, Barrels) + labs(title = "Barrels of Oil")
+autoplot(ACF(us_gasoline, Barrels)) + labs(title = "Barrels of Oil")
+```
+We can see that the time series has weekly frequency. It’s very hard to see the seasonality from just looking at the graphs, as the frequency is high, but we can still recognize some pattern of seasonality. If we look at the ACF curve, it is the evidence of strong seasonality and strong trend. The trend is therefore clear, which an upward linear line would be appropriate. There are some signs of cyclicity as well. The data might imply that the demand for barrels of oil changes over time in a pattern, which might be related to the production. It seems like the volatility of barrels first remains constant and high, but decreases since 2004, and becomes high and constant again in about 2010. This pattern is an unusual fact.
+
+## Question 3.2
+```{r 3.2(a)}
+usa_data <- subset(global_economy, Country == "United States")
+usa_data
+autoplot(usa_data)+ labs(title = "USAGDP")
+global_economy %>%
+filter(Country == "United States") %>%
+autoplot(GDP/Population) + labs(title = "United States GDP Per Capita")
+```
+Performed a population transformation to obtain per-capita data due to the potential impact of population changes on GDP. The overall trend is the same as the two plots are very similar.
+
+```{r 3.2(b)}
+Vic <- subset(aus_livestock, State == "Victoria" & Animal == "Bulls, bullocks and steers")
+Vic %>%
+  autoplot(Count) + labs(title = "Slaughter of Vicorian Bulls, Bullocks, and Steers")
+```
+No transformation
+
+```{r 3.2(c)}
+vic_elec %>% autoplot(Demand) + labs(title = "Victorian Electricity Demand")
+
+vic_elec %>%
+group_by(Date) %>%
+index_by(Date = yearweek(Time)) %>%
+summarise(Demand = sum(Demand)) %>%
+autoplot(Demand) + labs(title= "Weekly Victorian Electricity Demand", y = "$US (in trillions)")
+```
+Performed a calendar transformation to reflect weekly demand rather than half-hourly demand. Plotting a point for every 30 minutes makes the plot difficult to interpret because it is so cluttered that seasonality in particular is hard to observe. Plotting weekly electricity demand results in a much cleaner plot such that it is easier to see the seasonality and variation in weeks.
+
+```{r 3.2(d)}
+aus_production %>% autoplot(Gas)
+lambda <- aus_production %>% features(Gas, features = guerrero) %>% pull(lambda_guerrero)
+aus_production %>%
+autoplot(box_cox(Gas, lambda)) + labs(y = "", title = "Transformed Gas Production (lambd = 0.11)")
+```
+The variation increases with the level of the series, so a box-cox transformation helps to make all the variances similar across the whole series.
+
+## Question 3.8
+```{r 3.8}
+set.seed(123)
+myseries <- aus_retail |>
+  filter(`Series ID` == sample(aus_retail$`Series ID`,1))
+
+x11_dcmp <- myseries %>%
+  model(x11 = X_13ARIMA_SEATS(Turnover ~ x11())) %>%
+  components()
+
+autoplot(x11_dcmp) + 
+  labs(title = "Decomposition of Retail Turnover using X-11")
+```
+There are a few outliers that is obvious from looking at the spikes in the irregular plot, the most significant one is the one in 2001. Another observation is that the seasonality decreaases over time. 
+
+## Question 3.9
+(a) There is an overall increasing trend in the number of persons in the civilian labor force in Australia. However, there were decline in the labor force around 1991 and 1992 by the significant decrease in the remainder plot, which main be due to a recession. There is some level of sesonality, although the scale of seasonality is insignificant compared to trend, so the seasonality does not have much of an influence. There is some cycles present, although insignificant. 
+
+(b) The recession of 1991/1992 is visible in the estimated components. 

@@ -1,0 +1,456 @@
+# HW
+```{r echo=FALSE, message=FALSE, warning=FALSE, Load_packages}
+library(fpp2)
+library(xlsx)
+library(tseries)
+library(Quandl)
+library(fpp3)
+library(tseries)
+library(forecast)
+library(readxl)
+library(tseries)
+library(forecast)
+library(fpp3)
+library(seasonal)
+library(fable)
+library(stats)
+require(graphics)
+library(readxl)
+library(car)
+library(lmtest)
+library(readr)
+library(dynlm)
+library(fma)
+library(TSA)
+library(timeSeries)
+library(strucchange)
+library(vars)
+library(lmtest)
+library(dlnm)
+library(tidyverse)
+library(expsmooth)
+library(fpp2)
+```
+# 1. Problem 11.1
+
+```{r, warning = FALSE}
+data <- read_excel("Chapter11_exercises_data.xls")
+
+data$GSF <- as.numeric(data$GSF)
+data$GSJ <- as.numeric(data$GSJ)
+
+data <- data %>% 
+  dplyr::select(Date, GSF, GSJ) %>% 
+  na.omit()
+
+```
+
+
+```{r}
+# Split into estimation and prediction samples
+train <- data[1:(nrow(data) - 20), ] %>% dplyr::select(GSF, GSJ)
+test <- data[(nrow(data) - 19):nrow(data), ] %>% dplyr::select(GSF, GSJ)
+
+summary(train)
+summary(test)
+
+```
+
+GSF and GSJ represent the quarterly house price growth rate calculated based on the original house price indices for San Francisco-Oakland-Fremont and San Jose-Sunnyvale-Santa Clara, respectively. For the train sample, GSF has a median of 2.2296 and mean of 2.1558. The middle 50% of data lies between 0.2828 and 3.8616. For the train sample of GSJ, the median is 1.635 and mean is 1.892, while the middle 50% of data lies between 0.400 and 3.311. In both test samples, the median and mean are both negative, and the min, max, and quartiles are all much lower compared to the train data. This is because of the dynamics of the time period from 2008 to 2012. 
+
+```{r}
+# Create TS objects using estimation sample
+GSF_train <- ts(train$GSF,
+            start = c(1975, 2), 
+            end = c(2007, 3), 
+            frequency = 4)
+
+GSJ_train <- ts(train$GSJ, 
+              start = c(1975, 2), 
+              end = c(2007, 3), 
+              frequency = 4)
+
+# VAR model
+VAR_data <- window(ts.union(GSF_train, GSJ_train), start = c(1975, 2), end = c(2007, 3))
+
+VARselect(VAR_data, lag.max = 10)
+
+```
+
+We will use a lag length of 3 for the VAR model.
+
+```{r}
+var_model <- VAR(y = VAR_data, p = 3)
+summary(var_model)
+```
+
+In the equation for GSF, the second lag of GSF and the third lag of GSJ have p-values higher than 0.05, so we could consider removing them from the model. The equation for GSF has an adjusted R-squared value of 0.6056, which is pretty good. In the equation for GSJ, the first and second lags for GSF and the third lag of GSJ have p-values higher than 0.05, so they may not have a meaningful influence on GSJ. The model has an adjusted R-squared value of 0.6189, similar to the first equation.
+
+
+
+# 2. Problem 11.2
+```{r}
+grangertest(GSF_train, GSJ_train, order = 3)
+grangertest(GSJ_train, GSF_train, order = 3)
+```
+
+Using an order of 3, the granger-causality tests both have a p-value below 0.05, so they suggest that GSF granger-causes GSJ and that GSJ also granger-causes GSF. This indicates that past values of GSF can be used to predict future values of GSJ, and vice versa.
+
+
+# 3. Problem 11.3
+```{r}
+plot(irf(var_model))
+```
+
+
+The first plot shows that a shock in GSF causes an immediate significant response in GSF followed by a gradual decline around the second lag. This suggests that the economy responds significantly to its own shocks in the short term and maintains a positive response throughout. The second plot similarly shows that a shock in GSF causes a positive and significant response in GSJ at first followed by a gradual decline to near baseline level around the second lag, indicating a connection between the two economies. The third plot shows that a shock in GSJ causes a positive response in GSF in the short term followed by a gradual decline to baseline by the third lag, at which point the response is about zero. The final plot shows that a shock in GSJ causes a positive and significant response in GSJ in the short term followed by a gradual decline to baseline by the third lag, at which point the response is roughly zero throughout.
+
+# 4) Problem 7.8
+
+**a)**
+```{r, tidy = TRUE}
+retaildata <- read_excel("retail.xlsx", skip=1)
+
+myts <- ts(retaildata[,"A3349873A"],
+           frequency=12, start=c(1982,4))
+
+autoplot(myts)
+```
+Multiplicative seasonality is necessary because the seasonal fluctuations vary with time. The amplitude of this data grows with time, signaling multiplicative tendencies.
+
+**b)**
+```{r, tidy = TRUE}
+fit1 <- hw(myts, seasonal = "multiplicative")
+fit2 <- hw(myts, seasonal = "multiplicative", damped = TRUE)
+
+autoplot(myts) +
+  autolayer(fit1, series="HW multiplicative forecasts", PI=FALSE) +
+  autolayer(fit2, series="HW multiplicative forecasts - damped", PI=FALSE)
+```
+
+**c)**
+```{r, tidy = TRUE}
+rmse1 <- accuracy(fit1)["Training set", "RMSE"]
+rmse1
+rmse2 <- accuracy(fit2)["Training set", "RMSE"]
+rmse2
+```
+The RMSEs are basically the same, but the one for the multiplicative method is slightly lower so I will prefer that one over the damped method.
+
+**d)**
+```{r, tidy = TRUE}
+tsdisplay(fit1$res)
+lbtest <- Box.test(fit1$res, lag=20, type="Ljung-Box")
+lbtest
+```
+No, the residuals from the best method do not exhibit white noise. There are a few lags that cross the bands, signalling autocorrelation. Also, the Ljung-Box test (p = 0.01822) confirms that the residuals are not white noise.
+
+**e)**
+```{r, tidy = TRUE}
+myts.train <- window(myts, end=c(2010,12))
+myts.test <- window(myts, start=2011)
+
+fit3 <- hw(myts.train, h=36, seasonal = "multiplicative")
+fc <- snaive(myts.train, h=36)
+
+autoplot(myts) +
+  autolayer(fit3, series="multiplicative", PI=FALSE) +
+  autolayer(fc, series="snaive", PI=FALSE)
+
+accuracy(fit3, myts.test)
+accuracy(fc, myts.test)
+
+rmse3 <- accuracy(fit3, myts.test)["Test set", "RMSE"]
+rmse3
+rmse4 <- accuracy(fc, myts.test)["Test set", "RMSE"]
+rmse4
+```
+Yes, the holt-winters multiplicative method beats the seasonal naive approach. The rmse is lower and the graph shows it is slightly closer to the actual test set values than the snaive approach.
+
+# 5) Problem 7.9
+
+```{r, tidy = TRUE}
+#Box-Cox transformation
+lambda <- BoxCox.lambda(myts)
+myts.bc <- BoxCox(myts, lambda)
+myts.bc <- ts(myts.bc[,1], frequency=12, start=c(1982,4))
+
+#STL decomposition
+stl_decomp <- stl(myts.bc, s.window="periodic", robust = TRUE)
+autoplot(stl_decomp)
+
+#get seasonally adjusted data
+seasonal_component <- stl_decomp$time.series[, "seasonal"]
+seasonally_adjusted <- myts.bc - seasonal_component
+
+#define training/test sets
+myts_train <- window(myts.bc, end=c(2010,12))
+myts_test <- window(myts.bc, start=2011)
+
+#perform ETS
+ets.fit <- ets(myts_train)
+ets.forecast <- forecast(ets.fit, h = 36)
+
+#check RMSE
+rmse5 <- accuracy(ets.forecast, myts_test)["Test set", "RMSE"]
+rmse5
+```
+The RMSE of 0.5734974 is the lowest compared to the other best previous forecasts.
+
+### Question 6 11-a)
+```{r}
+data(visitors)
+```
+
+```{r}
+autoplot(visitors)
+```
+The data exhibits a multiplicative increasing trend. Additionally, a seasonal pattern is evident, recurring every year.
+
+### 11-b)
+
+```{r}
+fc <- hw(subset(visitors,end=length(visitors)-24),
+         damped = TRUE, seasonal="multiplicative", h=24)
+autoplot(visitors) +
+  autolayer(fc, series="HW multi damped", PI=FALSE)+
+  guides(colour=guide_legend(title="Yearly forecasts"))
+```
+
+### 11-c)
+
+Due to the increase in the magnitude of the visitor numbers, a multiplicative seasonal model is necessary.
+
+### 11-d)
+
+```{r}
+visitors_train <- subset(visitors, end = length(visitors) - 24)
+visitors_test <- subset(visitors, start = length(visitors) - 24)
+
+# 1. ETS model
+fc_ets <- forecast(ets(visitors_train), h = 24)
+plot(fc_ets)
+
+# 2. Additive ETS on Box-Cox transformed series
+lambda <- BoxCox.lambda(visitors_train)
+fc_ets_add_BoxCox <- forecast(ets(visitors_train, lambda = lambda, additive.only = TRUE), h = 24)
+plot(fc_ets_add_BoxCox)
+
+# 3. Seasonal naive method
+fc_snaive <- snaive(visitors_train, h = 24)
+plot(fc_snaive)
+
+# 4. STL decomposition on Box-Cox transformed data with ETS on seasonally adjusted data
+visitors_train_bc <- BoxCox(visitors_train, lambda)
+stl_out <- stl(visitors_train_bc, s.window = 12)  # Use seasonal argument
+visitors_sa <- stl_out$time.series
+plot(visitors_sa)
+```
+
+### 11-e)
+
+```{r}
+checkresiduals(fc_ets)
+checkresiduals(fc_ets_add_BoxCox)
+checkresiduals(fc_snaive)
+```
+
+The Ljung-Box test reveals that the seasonal naive method fails to capture all the trends in the data. This is because its residuals exhibit a strong autocorrelation, indicated by a very high Q statistic and a very low p-value from the test. On the other hand, the Additive ETS model on Box-Cox transformed series emerges as the best candidate. This model demonstrates the lowest Q statistic and the highest p-value in the Ljung-Box test, suggesting minimal autocorrelation in the residuals and a good fit for the data.
+
+### 11-f)
+
+```{r}
+# first, make functions to make model to yield forecast class object
+fets_add_BoxCox <- function(y, h) {
+  forecast(ets(
+    y,
+    lambda = BoxCox.lambda(y),
+    additive.only = TRUE
+  ),
+  h = h)
+}
+fstlm <- function(y, h) {
+  forecast(stlm(
+    y, 
+    lambda = BoxCox.lambda(y),
+    s.window = frequency(y) + 1,
+    robust = TRUE,
+    method = "ets"
+  ),
+  h = h)
+}
+fets <- function(y, h) {
+  forecast(ets(y),
+           h = h)
+  }
+
+# I'll compare the models using RMSE
+sqrt(mean(tsCV(visitors, snaive, h = 1)^2, na.rm = TRUE))
+sqrt(mean(tsCV(visitors, fets_add_BoxCox, h = 1)^2,
+          na.rm = TRUE))
+sqrt(mean(tsCV(visitors, fstlm, h = 1)^2,
+          na.rm = TRUE))
+sqrt(mean(tsCV(visitors, fets, h = 1)^2, na.rm = TRUE))
+sqrt(mean(tsCV(visitors, hw, h = 1, 
+               seasonal = "multiplicative")^2,
+          na.rm = TRUE))
+```
+tsCV errors show that the best model is the STL + ETS(M, A, N) model and the worst model is seasonal naive model. If I hadn't calculated accuracy using test set, I couldn't have known that the forecasts from seasonal naive method were the most accurate ones.
+
+### Question 7 13-a)
+
+```{r cars}
+data(hsales)
+is.ts(hsales)
+```
+The data transformation is necessary due to its non-stationary nature (lack of mean reversion).
+
+### 13-b)
+
+```{r}
+tsdisplay(hsales)
+hsales_diff <- diff(hsales, lag = 12 , differences = 1)
+tsdisplay(hsales_diff)
+```
+
+Using seasonal difference would take the seasonal pattern present in the data that repeat every 12 months into account.
+
+### 13-c) 
+
+```{r}
+#hsales_diff
+hsales_model <- arima(hsales_diff, order = c(13, 0, 0))
+AIC(hsales_model)
+hsales_model_2 <- arima(hsales_diff, order = c(25, 0, 0))
+AIC(hsales_model_2)
+```
+
+Based on the exponentially decaying ACF with significant spikes at lags 13 and 25, I've chosen to evaluate ARIMA(13,0,0) and ARIMA(25,0,0) models. Since a lower AIC value indicates a better fit, ARIMA(25,0,0) would be a better model.
+
+### 13-d
+
+```{r}
+coef(hsales_model_2)
+checkresiduals(hsales_model_2)
+```
+
+The residuals exhibit an approximately normal distribution centered around zero, suggesting characteristics close to a white noise process.
+
+### 13-e)
+
+```{r}
+plot(forecast(auto.arima(hsales),h=24))
+```
+
+### 13-f)
+
+```{r}
+hsales %>% ets() %>% forecast(h=24) %>% autoplot()
+```
+
+The ETS forecast exhibits a stronger seasonal pattern compared to the other models.
+
+### Question 8: 8.18. 
+
+# a. 
+```{r}
+gdp.NA <- Quandl("FRED/GDP", api_key= "mVHzLbBisoncyRnYC27C", type = "ts", transform = "rdiff")
+str(gdp.NA)
+head(gdp.NA)
+```
+
+# b. Plot graphs of the data, and try to identify an appropriate ARIMA model.
+```{r}
+autoplot(gdp.NA)
+ndiffs(gdp.NA)
+ggtsdisplay(diff(gdp.NA))
+auto.arima(gdp.NA)
+```
+
+From auto.arima, ARIMA(1,1,3)(2,0,0) model will fit well to the data.
+
+# c. Do residual diagnostic checking of your ARIMA model. Are the residuals white noise?
+```{r}
+gdp.NA_arima <- auto.arima(gdp.NA)
+autoplot(gdp.NA_arima$residuals)
+checkresiduals(gdp.NA_arima)
+```
+The residuals are like white noise.
+
+# e. Use your chosen ARIMA model to forecast the next four years.
+```{r}
+fc_gdp.NA_arima <- forecast(
+  gdp.NA_arima, h = 4
+)
+
+autoplot(fc_gdp.NA_arima)
+```
+The forecast values of gdp production are first increasing. But then increase will stop and decrease a bit, before dampening to constant.
+
+# f. Now try to identify an appropriate ETS model.
+```{r}
+gdp.NA_ets <- ets(gdp.NA)
+
+gdp.NA_ets
+```
+Chosen model is ETS(A, N, N).
+
+# g. Do residual diagnostic checking of your ETS model. Are the residuals white noise?
+```{r}
+checkresiduals(gdp.NA_ets)
+```
+The residuals are not like white noise.
+
+# h. Use your chosen ETS model to forecast the next four years.
+```{r}
+fc_gdp.NA_ets <- forecast(
+  gdp.NA_ets, h = 4
+)
+
+autoplot(fc_gdp.NA_ets)
+```
+The forecast values of difference in growth rate in GDP is stationary. 
+
+# i. Which of the two models do you prefer?
+I prefer ARIMA model. Because it has better estimate given the residuals behaving like white noise. Also, I think at the current state, with the US government trying to reduce inflation, there should be slight decrease in the growth rate of GDP.
+
+### Question 9
+```{r}
+
+beer=read.csv("beer.csv",header=T,dec=",",sep=";")
+beer=ts(beer[,1],start=1956,freq=12) #,1 to take the values
+lbeer <-log(beer) #make it has constant variance
+
+train <- window(lbeer, end=c(1988,1))
+h <- length(lbeer) - length(train)
+ETS <- forecast(ets(train), h=h)
+ARIMA <- forecast(auto.arima(train, lambda=0, biasadj=TRUE),
+  h=h)
+STL <- stlf(train, lambda=0, h=h, biasadj=TRUE)
+NNAR <- forecast(nnetar(train), h=h)
+TBATS <- forecast(tbats(train, biasadj=TRUE), h=h)
+Combination <- (ETS[["mean"]] + ARIMA[["mean"]] +
+  STL[["mean"]] + NNAR[["mean"]] + TBATS[["mean"]])/5
+
+autoplot(lbeer) +
+  autolayer(ETS, series="ETS", PI=FALSE) +
+  autolayer(ARIMA, series="ARIMA", PI=FALSE) +
+  autolayer(STL, series="STL", PI=FALSE) +
+  autolayer(NNAR, series="NNAR", PI=FALSE) +
+  autolayer(TBATS, series="TBATS", PI=FALSE) +
+  autolayer(Combination, series="Combination") +
+  xlab("Year") + ylab("$ billion") +
+  ggtitle("log of Montly production of beer in Autralia")
+```
+
+
+```{r}
+c(ETS = accuracy(ETS, lbeer)["Test set","RMSE"],
+  ARIMA = accuracy(ARIMA, lbeer)["Test set","RMSE"],
+  `STL-ETS` = accuracy(STL, lbeer)["Test set","RMSE"],
+  NNAR = accuracy(NNAR, lbeer)["Test set","RMSE"],
+  TBATS = accuracy(TBATS, lbeer)["Test set","RMSE"],
+  Combination = accuracy(Combination, lbeer)["Test set","RMSE"])
+```   
+    
+All of these individual models have really high accuracy, but the combination approach is even better. 

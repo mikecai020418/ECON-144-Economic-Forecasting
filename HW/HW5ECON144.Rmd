@@ -1,0 +1,94 @@
+---
+title: "ECON144 HW5"
+author: "Jiyoon Kim"
+date: "2024-05-29"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+library(readxl)
+library(forecast)
+library(rugarch)
+library(tseries)
+library(ggplot2)
+```
+
+```{r}
+cpi <- read_excel("Data/Chapter14_exercises_data.xls", sheet = "Exercise 5a")
+gdp <- read_excel("Data/Chapter14_exercises_data.xls", sheet = "Exercise 5b")
+inf <- cpi$`INFLATION RATE`[2:nrow(cpi)]
+gdp_grow <- gdp$`GDP GROWTH`[2:nrow(gdp)]
+mean(inf)
+mean(gdp_grow)
+plot(inf, type="l")
+plot(gdp_grow, type = "l")
+adf.test(cpi$`INFLATION RATE`[2:nrow(cpi)])
+adf.test(gdp$`GDP GROWTH`[2:nrow(gdp)])
+auto.arima(cpi$"INFLATION RATE"[2:nrow(cpi)]) #ARIMA order (4,1,1)
+auto.arima(gdp$"GDP GROWTH"[2:nrow(gdp)]) #ARIMA order (2,0,2)
+diff_inf<- diff(inf)
+```
+
+
+```{r}
+#Model for inflation rate
+model <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(3, 3)),
+  mean.model = list(armaOrder = c(4, 1), include.mean = TRUE),
+  distribution.model = "sstd"
+)
+
+# Sanity check: explore the model parameters
+print(model@model$pars)
+
+# Fit the model to the data
+modelfit1 <- ugarchfit(spec = model, data = diff_inf)
+print(modelfit1)
+plot(modelfit1, which = 10)
+plot(modelfit1, which = 11)
+
+modelfor = ugarchforecast(modelfit1, data = NULL, n.ahead = 2, n.roll = 0, out.sample = 0)
+plot(modelfor, which = 1)
+
+#get forecasted volatility
+forecasted_volatility <- sigma(modelfor)
+
+#One step ahead volatility forecast
+lower_1 <- -1.96 * forecasted_volatility[1]
+upper_1 <- 1.96 * forecasted_volatility[1]
+
+#print 95% prediction intervals
+cat("One-Step Ahead - Lower Bound:", lower_1, "Upper Bound:", upper_1, "\n")
+
+#Model for GDP Growth
+model_2 <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+  mean.model = list(armaOrder = c(2, 2), include.mean = TRUE),
+  distribution.model = "sstd"
+)
+
+# Sanity check: explore the model parameters
+print(model_2@model$pars)
+
+modelfit_2 <- ugarchfit(spec = model, data = gdp_grow)
+print(modelfit_2)
+plot(modelfit_2, which = 10)
+plot(modelfit_2, which = 11)
+
+modelfor = ugarchforecast(modelfit1, data = NULL, n.ahead = 2, n.roll = 0, out.sample = 0)
+plot(modelfor, which = 1)
+
+forecasted_volatility <- sigma(modelfor)
+
+#One step ahead volatility forecast
+lower_1 <- -1.96 * forecasted_volatility[1]
+upper_1 <- 1.96 * forecasted_volatility[1]
+
+#95% prediction intervals
+cat("One-Step Ahead - Lower Bound:", lower_1, "Upper Bound:", upper_1, "\n")
+```
+
+

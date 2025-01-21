@@ -1,0 +1,558 @@
+---
+title: "HW2"
+author: "Mike Cai"
+date: "2024-04-26"
+output: 
+  html_document:
+    fig_width: 5
+    fig_height: 4
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+
+library(fpp2)
+library(seasonal)
+library(fma)
+library(readxl)
+library(dynlm)
+library(car)
+library(tseries)
+library(forecast)
+library(fpp3)
+library(fable)
+library(stats)
+require(graphics)
+# Load Libraries
+library(lattice)
+library(foreign)
+library(MASS)
+library(car)
+require(stats)
+require(stats4)
+library(KernSmooth)
+library(fastICA)
+library(cluster)
+library(leaps)
+library(mgcv)
+library(rpart)
+library(pan)
+library(mgcv)
+library(DAAG)
+library("TTR")
+library(tis)
+library(xtable)
+# New libraries added:
+library(stats)
+library(TSA)
+library(timeSeries)
+library(fUnitRoots)
+library(fBasics)
+library(timsac)
+library(TTR)
+library(fpp)
+```
+
+## 1) Problem 4.6
+
+```{r, tidy = TRUE}
+#import data
+ex1 <- read_excel("Chapter4_exercises_data.xls", sheet = "Exercise 6", range = "A1:C153")
+colnames(ex1) <- c('date', 'actual_growth', 'greenbook_growth_forecast')
+```
+
+**Time Series Plots**
+
+```{r, tidy = TRUE}
+#plot of realized values
+actual_growth_ts <- ts(ex1$actual_growth, start = 1969, freq = 4)
+plot(actual_growth_ts, main="Actual Growth", xlab = "Year", ylab = "Rate")
+#plot of forecasts
+greenbook_growth_forecast_ts <- ts(ex1$greenbook_growth_forecast, start = 1969, freq = 4)
+plot(greenbook_growth_forecast_ts, main="Greenbook Growth Forecast", xlab = "Year", ylab = "Rate")
+#plot of forecast errors
+forecast_errors <- actual_growth_ts - greenbook_growth_forecast_ts
+plot(forecast_errors, main="Forecast Errors", xlab = "Year", ylab = "Rate")
+```
+
+All three plots are first order stationary, with mean reversion and changes in variance. There is lots of volatility up until 1985 due to the large spikes, but it becomes more stable later on.
+
+**Descriptive Statistics**
+
+```{r, tidy = TRUE}
+summary(actual_growth_ts)
+summary(greenbook_growth_forecast_ts)
+summary(forecast_errors)
+```
+
+Actual growth shows the widest range, indicating more variability compared to the forecasted growth. The mean of actual growth is 0.75 while the mean of the forecasted growth is 0.68, suggesting that actual values tend to be slightly higher on average. Both actual growth and forecasted growth have means and medians that are nearly the same. The forecast errors show a slight positive skew, meaning that forecasts tend to underestimate actual growth.
+
+**ACF/PACF**
+```{r, tidy = TRUE}
+par(mfrow=c(1,2))
+
+#acf/pacf of realized values
+acf(actual_growth_ts)
+pacf(actual_growth_ts)
+
+#acf/pacf of forecasts
+acf(greenbook_growth_forecast_ts)
+pacf(greenbook_growth_forecast_ts)
+
+#acf/pacf of forecast errors
+acf(forecast_errors)
+pacf(forecast_errors)
+
+par(mfrow=c(1,1))
+```
+
+There is time dependency observed for both actual growth and forecasted growth, as observed by the significant spikes in the ACF and PACF plots. The autocorrelation in the forecasted growth is more evident, which makes sense since forecasts are limited in their ability to predict sudden changes. The forecast errors doesn't show autocorrelation, suggesting that the errors are random and don't depend on past values. 
+
+## 2) Problem 4.8
+
+```{r, tidy = TRUE}
+#expected value of the forecast error
+mean(forecast_errors)
+```
+
+The expected value of the forecast errors is 0.077, which is basically zero.
+
+```{r, tidy = TRUE}
+#run regression of forecast errors on several lags
+reg <- dynlm(forecast_errors ~ forecast_errors + L(forecast_errors, 1) + L(forecast_errors, 2) + L(forecast_errors, 3))
+summary(reg)
+```
+
+The p-value 0.66 > 0.05, so we fail to reject the null and conclude that the model is not statistically significant. Similarly, the p-values for the lagged terms are all > 0.05, which means that none of them significantly help predict the current forecast error. The adjusted r-squared is -0.009666, suggesting that the model doesn't explain much of the variation in the forecast errors.
+
+```{r, tidy = TRUE}
+#perform an f-test
+f_test <- linearHypothesis(reg, c("L(forecast_errors, 1) = 0", "L(forecast_errors, 2) = 0", "L(forecast_errors, 3) = 0"), test = "F")
+f_test
+```
+
+Looking at the f-test results, we see that the overall regression has a p-value of 0.66, which is not statistically significant. This suggests that the forecast error is not predictable from its own past. This is similar to what we saw with the autocorrelation functions in Exercise 6, where the forecast errors didn't show clear patterns and were likely random. This makes sense since one-quarter-ahead forecast errors represent the unexpected fluctuations.
+
+## 3) Problem 6.4
+**a)**
+#theoretical autocorrelation for lag 1
+$$
+y_t = 0.7 - 2\epsilon_{t-1} + 1.35\epsilon_{t-2} + \epsilon_t \\
+\rho_1 = \frac{\gamma_1}{\gamma_0} = \frac{\sigma^2(\theta_1 + \theta_1\theta_2^2)} {\sigma^2(1 + \theta_1^2 + \theta_2^2)} \\
+= \frac{1(-2 + (-2)(1.35))} {1 (1+ (-2)^2)+(1.35)^2} \\
+= \frac{4.77}{6.82} \\
+= -0.689
+$$
+
+#theoretical autocorrelation for lag 2
+$$
+\rho_2 = \frac{\gamma_2}{\gamma_0} \\
+= \frac{\theta^2}{\sigma_2(1 + \theta_1^2 + \theta_2^2)} \\
+= \frac{1.35}{6.82} \\
+= 0.197
+$$
+#theoretical autocorrelation for lags 3-10
+$$
+\rho_3 = ... = \rho_{10} = 0 \\
+$$
+
+**b)**
+```{r, tidy = TRUE}
+# ma.sim <- arima.sim(model = list(ma=c(-2, 1.35)), n = 100)
+# ma.sim
+# acf(ma.sim)
+# pacf(ma.sim)
+
+y = e = rnorm(100)
+for (t in 3:100) y[t] = 0.7 - 2*e[t-1] + 1.35*e[t-2] + e[t]
+# Plots and create objects
+acf <- acf(y, lag.max=10, main="Random MA(2) - ACF")
+pacf <- pacf(y, lag.max=10, main="Random MA(2) - PACF")
+```
+The sample ACF plot shows 2 significant spikes, and the sample PACF plot shows exponential decay which is expected for an MA(2) process. This is consistent with the theoretical autocorrelations calculated in a). The ACF values on the plot for lags 1 and 2 seem pretty close to the theoretical values calculated. For lags 3-10, the autocorrelations tend to be approaching 0 as well.  
+
+## 4) 6.5-a
+```{r}
+# ma.sim<-arima.sim(model=list(ma=c(-2,1.35)),n=100)
+# Calculate the unconditional mean
+unconditional_mean <- mean(y)
+
+# Plot ma.sim
+plot(y, type = "l", col = "blue", xlab = "Time", ylab = "Value", main = "MA(2) Simulated Data with Unconditional Mean")
+
+# Add the unconditional mean as a horizontal dashed line
+abline(h = unconditional_mean, lty = 2, col = "red")
+
+ma.model <- arma(y, order = c(0, 2))
+summary(ma.model)
+```
+The estimated model is y_t = 0.67 - 1.63\epsilon_{t-1} + 0.86\epsilon_{t-2} + \epsilon_t. The estimated parameters are very different from the theoretical values. We should expect some differences with the theoretical values because the sample size is small, but the differences that we observe are too large. 
+
+## 6.5-b.
+
+From the invertible process  y_t = 0.67 - 1.63\epsilon_{t-1} + 0.86\epsilon_{t-2} + \epsilon_t, we compute the following for h=1,2,3:
+```{r}
+# Given values
+epsilon_t <- 0.4
+epsilon_t1 <- -1.2
+
+# Compute f_t1
+f_t1 <- 0.67 - 1.63 * epsilon_t + 0.86 * epsilon_t1
+
+# Compute f_t2
+f_t2 <- 0.67 + 0.86 * epsilon_t
+
+# Compute f_t3
+f_t3 <- 0.67
+
+# Print the results
+cat("f_t1 =", f_t1, "\n")
+cat("f_t2 =", f_t2, "\n")
+cat("f_t3 =", f_t3, "\n")
+```
+
+## 5) 6.6
+
+\[
+\text{The process } y_t = 1.2 + 0.8\epsilon_{t-1} + \epsilon_t \text{ can be written as } y_t - 1.2 = (1 + 0.8L)\epsilon_t, \text{ which implies that } \frac{y_{t-1.2}}{1 - (-0.8L)} = \epsilon_t.
+\]
+
+\[
+\text{Since } 0.8 < 1, \text{ the ratio } \frac{1}{1 - (-0.8L)} \text{ is the limit of the following sequence: }
+\]
+\[
+\frac{1}{1 - (-0.8L)} = 1 - 0.8L + 0.82L^2 - 0.83L^3 + \dotsb
+\]
+\[
+\text{Thus, } (y_t - 1.2)\left(1 - 0.8L + 0.8^2L^2 - 0.8^3L^3 + \dotsb\right) = \epsilon_t.
+\]
+
+\[
+\text{Then, the autoregressive representation is }
+(y_t - 1.2) = 0.8(y_{t-1} - 1.2) - 0.8^2(y_{t-2} - 1.2) + 0.8^3(y_{t-3} - 1.2) - \dotsb + \epsilon_t.
+\]
+
+\[
+\text{The process } y_t = 1.2 + 1.25\epsilon_{t-1} + \epsilon_t \text{ is non-invertible, i.e., } \theta = 1.25 > 1. \text{ There is no limit to the ratio } \frac{1}{1 - (-1.25L)}, \text{ but we can transform this ratio by using the forward operator } F = \frac{1}{L}:
+\]
+\[
+\frac{1}{1 - (-1.25L)} = \frac{1}{1 - (-1/0.8F)} = \frac{0.8F}{1-(-0.8F)} = 0.8F(1 - 0.8F + 0.8^2F^2 - 0.8^3F^3 + \dotsb) 
+\]
+\[
+\text{Then, the autoregressive representation is }
+(y_t - 1.2) \times 0.8F(1 - 0.8F + 0.8^2F^2 - 0.8^3F^3 + \dotsb) = \epsilon_t,
+\]
+\[
+\text{which makes } y_t \text{ a function of the future values } y_{t+1}, y_{t+2}, \dotsc. \text{ Obviously, this representation is not useful for forecasting purposes. Thus, we choose the invertible process } y_t = 1.2 + 0.8\epsilon_{t-1} + \epsilon_t \text{ because the present is a function of the past.}
+\]
+
+## 6) 6.10
+
+Download financial prices of your favorite stocks. Obtain the autocorrelation functions. Which
+process(es) will fit the financial returns to these stocks? Propose a model, estimate it, and forecast at
+several horizons.
+```{r}
+nvda <- read.csv("NVDA2.csv")
+nvda_ts <- ts(nvda$AdjClose, start = 2019, end = 2024, frequency = 251)
+plot(nvda_ts)
+acf(nvda_ts, lag.max=50, main = "ACF of Nvidia Stock Prices")
+```
+Given the stochastic trend in the data, the MA process is likely a better fit to capture the volatility, particularly the noticeable sharp rise in early 2020 followed by the subsequent sharp decline.
+```{r}
+#AR(p) fits
+ar1=arma(nvda_ts,order=c(1,0))
+summary(ar1)
+ar2=arma(nvda_ts,order=c(2,0))
+summary(ar2)
+ar3=arma(nvda_ts,order=c(5,0))
+summary(ar3)
+#AR(3) model would be the best fit because it has the lowest AIC value.
+plot(nvda_ts,xlab='Year', ylab="Nvdia", lwd=2)
+grid()
+lines(ar1$fitted.values,col="blue",lwd=2,lty=2)
+lines(ar2$fitted.values,col="seagreen2",lwd=2,lty=2)
+lines(ar3$fitted.values,col="red",lwd=2,lty=2)
+legend("topright",legend=c("Data","AR(3)","AR(2)","AR(1)"),text.col=1:4,bty="n")
+#Forecast
+ar3=Arima(nvda_ts,order=c(3,0,0))
+plot(forecast(ar3,h=20),xlim=c(2019,2024)) #20-days ahead
+plot(forecast(ar3,h=100),xlim=c(2019,2024)) #100-days ahead
+plot(forecast(ar3,h=200),xlim=c(2019,2024)) #200-days ahead
+```
+
+```{r}
+#MA(q) Model Fitting
+ma1=arma(nvda_ts,order=c(0,1))
+summary(ma1)
+ma2=arma(nvda_ts,order=c(0,2)) 
+summary(ma2)
+ma5=arma(nvda_ts,order=c(0,5)) 
+summary(ma5)
+```
+All the coefficients in the MA models are statistically significant. MA(3) model would be the best fit because it has the lowest AIC value. However, the lower AIC values in the MA models compared to the AR model indicate that the MA models better capture the data's underlying structure, leaving less unexplained random error.
+```{r}
+#MA(q) fits
+plot(nvda_ts,xlab='Year', ylab="NVIDIA Stock Price", lwd=2)
+grid()
+lines(ma1$fitted.values,col="blue",lwd=1)
+lines(ma2$fitted.values,col="seagreen2",lwd=1)
+lines(ma5$fitted.values,col="red",lwd=1)
+legend("topright",legend=c("Data","MA(5)","MA(2)","MA(1)"),text.col=1:4,bty="n")
+```
+
+
+```{r}
+#Forecast
+ma5=Arima(nvda_ts,order=c(0,0,5))
+plot(forecast(ma5,h=50)) #50 days ahead
+plot(forecast(ma5,h=200)) #200 days ahead
+```
+
+## 7) 6.2 (Textbook c)
+
+# a
+```{r}
+autoplot(plastics) + ylab("Sales (Thousands)") + ggtitle("Monthly Sales of Product A for Plastics Manufacturer")
+
+ggseasonplot(plastics)
+ggsubseriesplot(plastics)
+```
+
+There are yearly seasonal fluctuations in the time series of sales of product A, where sales peak around the summer (mid-year) and are lowest at the beginning and end of each year. There is an overall increasing trend over the five years in the time series.
+
+
+# b
+```{r}
+#perform multiplicative decomposition
+plastics_dcmp <- decompose(plastics, "multiplicative")
+
+#plot multiplicative decomposition
+autoplot(plastics_dcmp) + ggtitle("Sales of Product A for Plastics Manufacturer — Multiplicative Decomposition")
+
+```
+
+
+# c
+The results of the multiplicative decomposition support the graphical interpretation from part a, as there is an increasing trend over the years and evident seasonality with peaks in the summer within each year.
+
+
+# d
+```{r}
+seasonal_plastics <- plastics_dcmp$seasonal
+seasonally_adjusted_plastics <- plastics/seasonal_plastics
+
+autoplot(plastics, series = "Data") + autolayer(seasonally_adjusted_plastics, series = "Seasonally Adjusted") + ggtitle("Sales of Product A for Plastics Manufacturer") + ylab("Sales (Thousands)")
+```
+
+
+```{r}
+#remove the trend and seasonality
+trend_plastics <- plastics_dcmp$trend
+detrend_plastics <- plastics/trend_plastics
+seasonal_plastics <- plastics_dcmp$seasonal
+seasonally_adjusted_plastics <- plastics/seasonal_plastics
+
+#detrended and seasonally adjusted series
+detrend_seas_adj_plastics <- plastics/plastics_dcmp$trend/plastics_dcmp$seasonal
+autoplot(detrend_seas_adj_plastics, main = "Detrended and Seasonally Adjusted - Multiplicative")
+
+#compute residuals
+residuals_plastics <- plastics / (trend_plastics * seasonal_plastics)
+
+# Plot ACF and PACF of residuals
+tsdisplay(residuals_plastics, lag.max = 20, main = "ACF and PACF of Residuals - Multiplicative")
+```
+
+
+```{r}
+# Seasonally Adjust: Y / S
+autoplot(seasonally_adjusted_plastics)
+```
+
+
+# e
+```{r}
+plastics2 <- plastics
+plastics2[30] <- plastics2[30] + 500
+
+plastics_dcmp2 <- decompose(plastics2, "multiplicative")
+
+seasonal_plastics2 <- plastics_dcmp2$seasonal
+seasonally_adjusted_plastics2 <- plastics2/seasonal_plastics2
+
+autoplot(plastics2, series = "Data") + autolayer(seasonally_adjusted_plastics2, series = "Seasonally Adjusted") + ggtitle("Sales of Product A for Plastics Manufacturer (with outlier)") + ylab("Sales (Thousands)")
+
+```
+
+The outlier creates a large upward spike in the data.
+
+#f
+```{r}
+plastics3 <- plastics
+plastics3[55] <- plastics3[55] + 500
+
+plastics_dcmp3 <- decompose(plastics3, "multiplicative")
+
+seasonal_plastics3 <- plastics_dcmp3$seasonal
+seasonally_adjusted_plastics3 <- plastics3/seasonal_plastics3
+
+autoplot(plastics3, series = "Data") + autolayer(seasonally_adjusted_plastics3, series = "Seasonally Adjusted") + ggtitle("Sales of Product A for Plastics Manufacturer (with outlier)") + ylab("Sales (Thousands)")
+
+
+```
+
+Having an outlier near the end rather than in the middle unsurprisingly results in a spike towards the end of the data rather than in the middle. This seems to affect the overall trend more and the seasonality less than if the outlier were in the middle.
+
+## 8) 6.6. We will use the bricksq data (Australian quarterly clay brick production. 1956-1994) for this exercise.
+
+# a. Use an STL decomposition to calculate the trend-cycle and seasonal indices. (Experiment with having fixed or changing seasonality.)
+```{r Question6(a)}
+# STL decomposition with fixed seasonality
+stl_brick_fixed_st <- stl(bricksq, 
+                          s.window = "periodic",
+                          robust = TRUE)
+
+# STL decomposition with changing seasonality
+stl_brick_changing_st <- stl(bricksq,
+                             s.window = 5,
+                             robust = TRUE)
+
+# plot decomposed data
+autoplot(stl_brick_fixed_st) +
+  ggtitle("Brick production data decomposed by STL with fixed seasonality")
+
+autoplot(stl_brick_changing_st) +
+  ggtitle("Brick production data decomposed by STL with changing seasonality")
+```
+According to the plot above, the fixed seasonality has seasonal component that is additive, and the changing seasonality has seasonal component that is multiplicative. Moreover, fixed seasonality has slightly noisier remainder than changing seasonality. 
+
+# b. Compute and plot the seasonally adjusted data.
+```{r Question6(b)}
+# plot data which are decomposed by STL with fixed seasonality
+autoplot(bricksq, series = "Data") +
+  autolayer(trendcycle(stl_brick_fixed_st),
+            series = "Trend-cycle") +
+  autolayer(seasadj(stl_brick_fixed_st),
+            series = "Seasonally Adjusted Data") +
+  ggtitle("Quarterly clay brick production in Australia",
+          subtitle = "-decomposed by STL with fixed seasonality") +
+  scale_color_manual(values = c("gray", "red", "blue"),
+                     breaks = c("Data", "Trend-cycle", "Seasonally Adjusted Data"))
+
+# plot data which are decomposed by STL with changing seasonality
+autoplot(bricksq, series = "Data") +
+  autolayer(trendcycle(stl_brick_fixed_st),
+            series = "Trend-cycle") +
+  autolayer(seasadj(stl_brick_fixed_st),
+            series = "Seasonally Adjusted Data") +
+  ggtitle("Quarterly clay brick production in Australia",
+          subtitle = "-decomposed by STL with changing seasonality") +
+  scale_color_manual(values = c("gray", "red", "blue"),
+                     breaks = c("Data", "Trend-cycle", "Seasonally Adjusted Data"))
+```
+
+# c. Use a naïve method to produce forecasts of the seasonally adjusted data.
+```{r Question6(c)}
+stl_brick_fixed_st %>% seasadj() %>% naive() %>% autoplot() + 
+  ggtitle(label = "Naive forecast of seasonally adjusted brick data",
+          subtitle = "after STL decomposition with fixed seasonality")
+
+stl_brick_changing_st %>% seasadj() %>% naive() %>% autoplot() + 
+  ggtitle(label = "Naive forecast of seasonally adjusted brick data",
+          subtitle = "after STL decomposition with changing seasonality")
+```
+
+From the two forecasts, we can see that the prediction intervals of seasonally adjusted data decomposed by STL with changing seasonality have slightly smaller range than the one with fixed seasonality. It happened because the variance of the remainder component decreased when the seasonality can be changed.
+
+# d. Use stlf to reseasonalize the results, giving forecasts for the original data.
+```{r Question6(d)}
+stlf_brick <- stlf(bricksq) #reseasonalize
+autoplot(stlf_brick) #giving forecasts for original data
+```
+# e. Do the residuals look uncorrelated?
+```{r Question6(e)}
+checkresiduals(stlf_brick)
+```
+The residuals doesn't look uncorrelated. They are correlated with each other shown by the small p-value. 
+
+# f. Repeat with a robust STL decomposition. Does it make much difference?
+```{r Question6(f)}
+stlf_brick_robust <- stlf(bricksq, robust = TRUE)
+autoplot(stlf_brick_robust)
+checkresiduals(stlf_brick_robust)
+```
+With a robust stl decomposition, it looks like the autocorrelations became lower generally, but there are still some high values left.
+
+# g. Compare forecasts from stlf with those from snaive, using a test set comprising the last 2 years of data. Which is better?
+```{r Question6(g)}
+trainset_brick <- subset(bricksq, 
+                        end = length(bricksq) - 8)
+testset_brick <- subset(bricksq,
+                        start = length(bricksq) - 7)
+
+snaive_brick <- snaive(trainset_brick)
+stlf_brick_part <- stlf(trainset_brick, robust = TRUE)
+
+# plot data and forecast results
+autoplot(bricksq, series = "Original data") +
+  geom_line(size = 1) +
+  autolayer(stlf_brick_part, PI = FALSE, size = 1,
+            series = "stlf") +
+  autolayer(snaive_brick, PI = FALSE, size = 1,
+            series = "snaive") +
+  scale_color_manual(values = c("gray50", "blue", "red"),
+                     breaks = c("Original data", "stlf", "snaive")) +
+  scale_x_continuous(limits = c(1990, 1994.5)) +
+  scale_y_continuous(limits = c(300, 600)) +
+  guides(colour = guide_legend(title = "Data")) +
+  ggtitle("Forecast from stlf and snaive functions") +
+  annotate(
+    "rect",
+    xmin=1992.75,xmax=1994.5,ymin=-Inf,ymax=Inf,
+    fill="lightgreen",alpha = 0.3
+    )
+```
+We can see from the plot that the forecasts from stlf function are more similar to the original data than the forecasts from snaive function. Unlike snaive function, stlf function can also use trend, and its seasonality can change over time. The test set have trend with seasonality. Therefore stlf function was better than snaive function to predict brick production amount of near future.
+
+## 9) 6.7 (Textbook c)
+
+```{r}
+autoplot(writing)
+```
+
+The data exhibits both an upward trend and yearly seasonality. Thus, the "rwdrift" method is more appropriate than the "naive" method.
+
+```{r}
+fit <- stlf(writing, s.window = "periodic", robust = TRUE, method = "rwdrift")
+
+autoplot(fit, main = "Forecast without Box-Cox Transformation") + xlab("Month") + ylab("Sales")
+
+fit2 <- stlf(writing, s.window = "periodic", robust = TRUE,lambda = BoxCox.lambda(writing))
+
+autoplot(fit2, main = "Forecast with Box-Cox Transformation") + xlab("Month") + ylab("Sales")
+
+```
+
+Based on the two forecasts, the one with a Box-Cox transformation seems to perform better and has smaller prediction intervals. The transformation improves the forecast because the seasonality varies over time in the original data.
+
+## 10) 6.8. Use stlf to produce forecasts of the fancy series with either method="naive" or method="rwdrift", whichever is most appropriate. Use the lambda argument if you think a Box-Cox transformation is required.
+
+```{r Question8}
+str(fancy)
+head(fancy)
+
+autoplot(fancy)
+```
+There is increasing trend so it would be better to use rwdrift method for forecasting non-seasonal component. And it would be better to do Box-Cox transformation to make the variation in the data about the same across the whole series.
+
+```{r Question8(b)}
+stlf_fancy <- stlf(fancy,
+                   s.window = 13,
+                   robust = TRUE,
+                   lambda = BoxCox.lambda(fancy),
+                   method = "rwdrift")
+
+autoplot(stlf_fancy)
+```
+The prediction intervals increase dramatically because of Box-Cox transformation. But without the transformation, the forecasts are unreasonable.
