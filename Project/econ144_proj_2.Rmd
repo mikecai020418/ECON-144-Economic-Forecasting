@@ -1,0 +1,618 @@
+---
+title: "Modeling Florida and Tennessee Imports"
+subtitle: "Econ 144 - Project 2"
+author: "Mike Cai, Daniel Wang, Tiffany Mok, Jiyoon Kim"
+date: "Spring 2024"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 2
+---
+\
+
+```{r setup, include=FALSE}
+rm(list=ls(all=TRUE))
+
+knitr::opts_chunk$set(echo = TRUE, out.width = "65%", message = FALSE,
+                      fig.align = "center", warning = FALSE)
+library(tidyverse)
+library(knitr)
+library(lubridate)
+library(patchwork)
+library(fpp3)
+library(tsibble)
+library(seasonal)
+library(fabletools)
+library(feasts)
+library(forecast)
+library(strucchange)
+library(vars)
+library(tseries)
+library(forecast)
+library(ggplot2)
+library(strucchange)
+library(lmtest)
+library(car)
+library(Metrics)
+```
+
+
+\pagebreak
+
+# I. Introduction
+
+Our project attempts to model and forecast the imports of goods for Florida and Tennessee. More specifically, we are looking at imports of manufactured and non-manufactured commodities based on destination according to the Federal Reserve Bank of St. Louis. Imports play a significant role in the overall economic activity of a state, especially since it is has a direct contribution to GDP. Forecasting import levels of a state provides essential information about the economic growth and stability of the region, and even about the U.S. as a whole.
+
+Our data on imports for Florida and Illinois covers the time period from January 2008 to March 2024, with monthly frequency. The data was sourced from the Federal Reserve Bank of St. Louis.
+
+\pagebreak
+
+# II. Results
+
+```{r}
+# Pre-processing
+
+# Import the logged data
+FL_raw <- read_csv("IMPTOTFL.csv")                  # importing Florida
+
+FL_raw <- FL_raw %>%
+  rename(Month = DATE, Imp = IMPTOTFL) 
+
+# Convert to tsibble
+FL_tsib <- FL_raw %>%
+  mutate_at(vars(Month), yearmonth) %>%
+  tsibble(index = Month)
+
+# Convert to ts object
+FL_ts <- ts(FL_raw, start = c(2008, 1), frequency = 12)[,-1]
+
+# auxiliary function to extract dates
+nber_to_date <- function(string){
+  year <- paste(unlist(strsplit(as.character(string), ""))[1:4], collapse = "")
+  month <- paste(unlist(strsplit(as.character(string), ""))[5:6], collapse = "")
+  day <- paste(unlist(strsplit(as.character(string), ""))[7:8], collapse = "")
+  return(paste(sep = "-", year, month, day))
+}
+
+# extracting dates from `nberDates()`
+recession_df <- tis::nberDates() %>% data.frame() %>%
+  mutate_at(vars(Start, End), function(x){
+    as.Date(vapply(x, nber_to_date, character(1)))
+  })
+recessions <- recession_df[32:34,]
+
+## Objects for time period ----------------
+
+### for adding to data frames
+
+# as data frame
+Months_df <- bind_cols(year = as.numeric(time(FL_ts)) %/% 1, # extract year
+                       month = round(12 * (as.numeric(time(FL_ts)) %% 1) + 1)) %>% # extract month
+  mutate(Month = yearmonth(paste(year, month))) %>% # concatenate
+  dplyr::select(Month)
+
+# data frame for observed months + FORECASTED
+Months_pred_df <- bind_rows(Months_df[,1],
+                            data.frame(Month = yearmonth(seq(as.Date("2024-04-01"),
+                                                             as.Date("2025-03-01"),
+                                                             length.out = 12)
+                            )))
+# as time series
+Months_pred_ts <- time(ts(as.Date(Months_pred_df$Month),
+                          start = c(2008, 1), freq = 12))
+```
+
+## (a) Time Series Plots
+
+### Florida
+
+In the time plot below, we see a general upward trend to the data, with a possible seasonal component. In addition to trend, the time series shows some stochastic cyclic behavior. With respect to ARMA models, the time series exhibits traits of an AR process due to its persistence and its variance being approximately constant overt time.
+
+```{r}
+plot1 <- FL_tsib %>% autoplot(color = "blue") +
+  labs(title = "FL imports time plot",
+       subtitle = "with recession bands",
+       y = "Log-millions of $") +
+  # NBER recession bands
+  annotate(geom = "rect", xmin = recessions$Start[2], xmax = recessions$End[2],
+           ymin = -Inf, ymax = Inf, fill = "grey30", alpha = 0.25) +
+  annotate(geom = "rect", xmin = recessions$Start[3], xmax = recessions$End[3],
+           ymin = -Inf, ymax = Inf, fill = "grey30", alpha = 0.25) +
+  theme_light()
+
+plot1
+```
+
+As far as the ACF and PACF for the data, we see gradual decay in the ACF with very slight spikes at every 12 lags, indicating a both seasonal and non-seasonal AR process. We note that the slow decay in the ACF confirms the strong persistence seen in the time plot.
+
+For the PACF, we see significant spikes at lags 1, 2, 13, and 18 challenging the seasonal AR theory.
+
+```{r}
+plot2 <- ACF(FL_tsib, lag_max = 36) %>% autoplot() + ggtitle("ACF of FL exports") +
+  theme_light() +
+  PACF(FL_tsib, lag_max = 36) %>% autoplot() + ggtitle("PACF of FL exports") +
+  theme_light()
+
+plot2
+```
+
+\pagebreak
+
+## (b) STL Decomposition
+
+### Florida
+
+We observe the positive trend component to the data, agreeing with our description of the trend from earlier. The seasonal component shows strong seasonality which changes shape over time, slightly decreasing in amplitude. There does seem to be a slight pattern to the remainder component, indicating possible cycles. There are clear deviations in the residuals around 2008 and 2021, understandable given the economic climates at the time.
+
+```{r}
+
+# STL decomposition
+FL_stl <- stl(FL_ts, t.window = 24, s.window = 15, robust = TRUE)
+
+plot6 <- FL_stl %>% autoplot(range.bars = FALSE) +
+  ggtitle("FL STL decomposition") + theme_light()
+
+plot6
+```
+
+\pagebreak
+
+## (c) Trend, Seasonality, and Cycles
+
+### Florida
+
+We propose the following model:
+\begin{align*}
+Y_t&=T^{Loess}_t+\sum^{12}_{i=1}\delta_iM_{i,t} + R_t &&\text{Trend and Seasonality} \\
+R_t&=\phi R_{t-1}+\varepsilon_t &&\text{Cycles}
+\end{align*}
+
+The first term ($T^{Loess}_t$) is the Loess fitted model for trend, found using an STL decomposition. The second component of the model captures seasonality using 12 seasonal dummy variables, one for each month. The parameters for the seasonality were determined also with in the STL decomposition. We note that we designed the seasonality to be fixed for the entirety of the data, i.e. the window for the seasonality was set to `"periodic"` so the values for each month do not fluctuate over time. Lastly, we selected an AR($1$) model for the cycles, represented with the equation with $R_t$. We chose the order of AR(1) using the `auto.arima()` function, which we also used to determine the estimates for $\phi$.
+
+We are unable to extract the explicit parameters used for the Loess trend component, but we can extract the seasonality and cycle components. They are summarized in the following two tables:
+
+```{r}
+
+# fitting ARMA model
+FL_stl2 <- stl(FL_ts, s.window = 'periodic', robust = TRUE)
+FL_resid <- remainder(FL_stl2) # remainder component
+FL_arma <- auto.arima(FL_resid,
+                      max.P = 0, max.D = 0, max.Q = 0) # no seasonal
+
+# print table of seasonal components
+FL_seas <- window(seasonal(FL_stl2), start = c(2008, 1), end = c(2008, 12))
+FL_seas_components <- data.frame(month.name, FL_seas) %>%
+  mutate_at(vars(month.name), function(x){
+    str_sub(x, start = 1, end = 3)
+  }) %>%
+  column_to_rownames("month.name") %>% t()
+rownames(FL_seas_components) <- NULL
+FL_seas_components_print <- kable(FL_seas_components, digits = 3,
+                                  caption = "FL Seasonal Component")
+
+# print table of cycle components
+FL_cycl <- data.frame(FL_arma$coef) %>% 
+  rename(Coefficients = FL_arma.coef)  %>% t()
+colnames(FL_cycl) <- c("AR(1)")
+FL_cycl_print <- kable(FL_cycl, digits = 4,
+                       caption = "FL Cycle Component")
+
+# plot model
+FL_fitted <- FL_stl2$time.series[,2] + seasonal(FL_stl2) + FL_arma$fitted # fitted values
+
+plot8 <- ggplot() +
+  geom_line(data = FL_tsib, aes(x = Month, y = Exp), lwd = 0.5) +
+  geom_line(aes(x = FL_tsib$Month, y = FL_fitted), color = "blue", alpha = 0.7) +
+  labs(title = "FL time series and model",
+       subtitle = "data in black, model in blue",
+       y = "Log-millions of $", x = "Month [1M]") +
+  theme_light()
+
+FL_seas_components_print
+FL_cycl_print
+```
+
+
+To illustrate the fit of the model, the following graph shows the original time series (black curve) and the model (blue curve).
+
+```{r}
+
+# plot model
+FL_fitted <- FL_stl2$time.series[,2] + seasonal(FL_stl2) + FL_arma$fitted # fitted values
+
+plot8 <- ggplot() +
+  geom_line(data = FL_tsib, aes(x = Month, y = Imp), lwd = 0.5) +
+  geom_line(aes(x = FL_tsib$Month, y = FL_fitted), color = "blue", alpha = 0.7) +
+  labs(title = "FL time series and model",
+       subtitle = "data in black, model in blue",
+       y = "Log-millions of $", x = "Month [1M]") +
+  theme_light()
+
+plot8
+```
+
+\pagebreak
+
+## (d) Residual Plots
+
+### Florida
+
+In the below residual plot, we see fairly constant scattering, with 1 outlier very far from 0. The variance in the residuals seems to be approximately constant, which suggest our model are pretty good. There are no obvious patterns, so our model is relatively successful at capturing the general behavior of the time series.
+
+```{r}
+# data frame with fitted + residuals
+FL_res_fitted_df <- data.frame(resid = FL_arma$residuals,
+                               fitted = FL_fitted)
+
+# residual plot
+plot10 <- ggplot(data = FL_res_fitted_df, aes(y = resid, x = fitted)) +
+  geom_point() +
+  labs(title = "FL model residual plot", y = "Residuals", x = "Fitted") +
+  geom_hline(yintercept = 0, color = "grey30", lty = 2) + theme_light()
+
+plot10
+```
+
+\pagebreak
+
+## (e) Residual ACF and PACF
+
+### Florida
+
+In the below ACF and PACF, we see close very few statistically significant spikes. We will verify with a statistical test in part (g) if the residuals follow a white noise process.
+
+```{r}
+
+# ARMA residuals
+FL_resid_tsib <-  bind_cols(FL_tsib$Month, FL_arma$residuals) %>%
+  rename(Month = "...1", resid = "...2") %>%
+  tsibble(index = Month)
+
+# ACF + PACF
+plot12 <- ACF(FL_resid_tsib, lag_max = 36) %>% autoplot() + ggtitle("ACF of FL residuals") +
+  theme_light() +
+  PACF(FL_resid_tsib, lag_max = 36) %>% autoplot() + ggtitle("PACF of FL residuals") +
+  theme_light()
+
+plot12
+```
+
+\pagebreak
+
+## (f) Cumulative Sum Plots
+
+### Florida
+
+In the CUSUM plot for Florida, we see very little divergence from 0. In fact, the cumulative sum stays well within the red bands, indicating that there are no structural breaks in the model.
+
+```{r}
+plot(efp(FL_arma$resid ~ 1, type = "Rec-CUSUM"))
+```
+
+
+\pagebreak
+
+## (g) Model Diagnostic Statistics
+
+### Florida
+
+```{r}
+# diagnostic statistics
+FL_MAPE <- MAPE(.resid = FL_resid_tsib$resid, .actual = FL_ts) # MAPE
+FL_RMSE <- RMSE(.resid = FL_resid_tsib$resid, .actual = FL_ts) # RMSE
+FL_ME <- ME(.resid = FL_resid_tsib$resid) # ME
+
+# Ljung-Box test
+FL_ljung <- Box.test(FL_resid_tsib$resid, lag = 12, type = "Ljung-Box")
+
+cat(sep = "", "MAPE: ", FL_MAPE,"\nRMSE: ", FL_RMSE,"\nME: ", FL_ME)
+FL_ljung
+
+coeftest(FL_arma)
+```
+\
+
+The model for Florida has a MAPE of 0.4311, which is below 50\%, not terrible for a model. The model's RMSE is 0.0533 (in log-millions of dollars) -- fairly low compared to the scale of the time series (a range from about 7 to 9). It is worth noting that the mean error is 0.0004697, so it is close to but not exactly 0, meaning that our model slightly underestimates the data.
+
+To further assess model appropriateness, a Ljung-Box test using 12 lags was performed. The test had a $p$-value of 0.2025; so at the 0.05 significance level we fail to reject the null hypothesis, meaning the residuals follow a white noise process. Therefore our model successfully captured the serial correlation within the time series.
+
+Lastly, we noticed that the ar1 coefficient has a very small P-value, so it's statistically significant. 
+
+\pagebreak
+
+## (h) 12-step-ahead Forecast
+
+Since we used an ARMA model to model the remainder component of the STL decomposition, the residuals of the combined model will be the residuals from the ARMA model. Thus the widths of the prediction interval for the ARMA model will be the widths of the prediction interval for the combined model.
+
+The forecasts of the STL decompositions used the naïve forecasting method, and the ARMA components were forecasted normally.
+
+### Florida
+
+The below plot has the 12-step-ahead forecast with error bands, starting in April 2024 and ending in March 2025.
+
+```{r}
+# forecasting components 
+FL_fore_ST <- as.numeric(forecast(FL_stl2, h = 12,
+                                  method = "naive")[["mean"]]) # naïve forecast for Trend + Seasonality
+FL_fore_arma <- forecast(FL_arma, h = 12) # cycle component forecast
+
+# combining the forecasts into one
+FL_fore <- bind_cols(Month = seq(as.Date("2024-04-01"), as.Date("2025-03-01"), length.out = 12),
+                     "estimate" = FL_fore_arma[["mean"]], # point estimate
+                     FL_fore_arma[["lower"]], # lower error bands
+                     FL_fore_arma[["upper"]], FL_fore_ST) %>% # upper error bands
+  # error bands
+  rename("lower_80" = "80%...3",
+         "lower_95" = "95%...4",
+         "upper_80" = "80%...5",
+         "upper_95" = "95%...6",
+         seas_trend = "...7") %>%
+  mutate_at(vars(estimate:upper_95), function(x) x + FL_fore_ST) %>%
+  dplyr::select(-seas_trend) %>%
+  mutate_at(vars(Month), yearmonth)
+
+FL_fore_ts <- ts(FL_fore, start = c(2024, 4), frequency = 12)[,-1]
+
+plot16 <- autoplot(FL_fore_ts[,1], color = "dodgerblue4") +
+  geom_ribbon(aes(ymin = FL_fore_ts[,3], ymax = FL_fore_ts[,5]),
+              fill = "dodgerblue2", alpha = 0.5) +
+  geom_ribbon(aes(ymin = FL_fore_ts[,2], ymax = FL_fore_ts[,4]),
+              fill = "dodgerblue3", alpha = 0.5) +
+  geom_line(aes(y = FL_fore_ts[,1]), color = "dodgerblue4", lwd = 0.7) +
+  labs(title = "FL exports forecast",
+       subtitle = "with error bands",
+       y = "Log-millions of $") +
+  geom_line(data = FL_ts) + xlim(2018, NA) + ylim(7.75, NA) +
+  theme_light()
+
+plot16
+```
+## (i) Comparing to ARIMA Model
+
+### Florida
+
+```{r}
+FL_arima <- auto.arima(FL_ts)
+FL_arima_fcst <-  forecast(FL_arima, h = 12) %>% # forecast
+  data.frame() %>%
+  rename(forecast = Point.Forecast,
+         lower.80 = Lo.80,
+         upper.80 = Hi.80,
+         lower.95 = Lo.95,
+         upper.95 = Hi.95)
+FL_arima_fcst_ts <- ts(FL_arima_fcst, start = c(2024, 4), freq = 12)
+
+# plotting
+plot18 <- autoplot(FL_arima_fcst_ts[,1], color = "dodgerblue4") +
+  geom_ribbon(aes(ymin = FL_arima_fcst_ts[,4], ymax = FL_arima_fcst_ts[,5]),
+              fill = "dodgerblue2", alpha = 0.5) +
+  geom_ribbon(aes(ymin = FL_arima_fcst_ts[,2], ymax = FL_arima_fcst_ts[,3]),
+              fill = "dodgerblue3", alpha = 0.5) +
+  geom_line(aes(y = FL_arima_fcst_ts[,1]), color = "dodgerblue4", lwd = 0.7) +
+  labs(title = "FL exports ARIMA forecast",
+       subtitle = "with error bands",
+       y = "Log-millions of $") +
+  geom_line(data = FL_ts) + xlim(2018, NA) +
+  theme_light()
+
+plot18
+```
+
+Above, we have a 12-steps-ahead forecast for Florida using an ARIMA model. Compared to the forecast from earlier, the ARIMA forecast shows larger error bands and less volatility in the 12-month forecasted window.
+
+
+From the summary output below, we see the ARIMA model has a higher MAPE: $MAPE_{ARIMA}=0.5708$ compared to $MAPE_{T+S+C} = 0.4311$. Further inspection of the other performance metrics (e.g. ME and RMSE) reveals that the ARIMA model's metrics have larger magnitudes than the original model in general. Thus our original model (STL decomposition with an ARMA component) performs better than the ARIMA model.
+\
+```{r}
+summary(FL_arima)
+```
+
+## (j) Combining forecasts
+
+### Florida
+
+```{r}
+
+# combining models with regression weighting scheme
+FL_combined <- lm(FL_ts ~ FL_fitted + FL_arima$fitted)
+FL_combined_resid <- FL_combined$resid
+
+# MAPE comparison
+FL_comb_MAPE <- MAPE(.resid = FL_combined_resid, .actual = FL_ts)
+FL_arima_MAPE <- MAPE(.resid = FL_arima$residuals, .actual = FL_ts)
+
+cat(sep = '',"T+S+C model MAPE: ", FL_MAPE, '\n',
+    "ARIMA model MAPE: ", FL_arima_MAPE, "\n",
+    "Cmb'd model MAPE: ", FL_comb_MAPE)
+```
+
+We combined the two models (ARIMA model and STL decomposed with ARMA component model) by implementing a rudimentary weighting scheme with a linear regression. When comparing the three models, we observe that the original model (STL decomposed with ARMA component) still has the lowest MAPE. Notably, the combined model performs very similarly to the original model, far better than the ARIMA model.
+
+
+### TENNESSEE IMPORTS
+
+**# 1)** 
+```{r, tidy = TRUE}
+#import data
+tn <- read.csv("IMPTOTTN.csv")
+#convert to time series
+tn_ts <- ts(tn$IMPTOTTN, start = 2008, freq = 12)
+```
+
+**a)**
+```{r, tidy = TRUE}
+#plot time series
+tsdisplay(tn_ts)
+#plot differenced time series
+tsdisplay(diff(tn_ts))
+#Because the original time series looks non-stationary, I will use the differenced time series for ease of modeling.
+```
+
+**b)**
+```{r, tidy = TRUE}
+stl <- stl(diff(tn_ts), s.window="periodic", robust=TRUE)
+autoplot(stl) +
+  ggtitle("TN STL Decomposition")
+```
+
+The STL decomposition shows that there is no trend. There is seasonality since the seasonal component looks consistently strong over time. There are cycles since the remainder component shows evidence of cyclical patterns.  
+
+**c)**
+```{r, tidy = TRUE}
+#tsdisplay(diff(tn_ts))
+
+plot(diff(tn_ts), col='gray')
+model=Arima(diff(tn_ts),order=c(2,0,0),seasonal=list(order=c(1,0,1)))
+lines(model$fitted,col="red")
+```
+
+Based on the tsdisplay in a), I constructed a model by analyzing the ACF/PACF plots of the differenced time series. There are significant spikes at the seasonal lags of the acf and pacf plots, signalling that seasonal AR(1) and seasonal MA(1) model would be appropriate. Additionally, significant spikes at lower order lags 1 and 2 of the pacf plot suggest an AR(2) model would be appropriate to capture the cycles.  
+
+**e)**
+```{r, tidy = TRUE}
+plot(model$fitted, model$res)
+```
+
+There is a lot of scatter and no clear patterns in the residuals vs. fitted values plot. Most values center around the mean of 0, with the presence of several outliers.
+
+**f)**
+```{r, tidy = TRUE}
+par(mfrow=c(2,1))
+acf(model$res, lag=100, main="ACF of Residuals")
+pacf(model$res, lag=100, main="PACF of Residuals")
+par(mfrow=c(1,1))
+```
+
+We hardly see any significant spikes in both the ACF and PACF plots of the residuals. There are a few lags that slightly cross the bands, but for the most part, we have gotten rid of the dynamics present in the residuals.
+
+**g)**
+```{r, tidy = TRUE}
+plot(efp(model$res~1, type ="Rec-CUSUM"))
+```
+
+The model does not break at any point and stays within the bands. There appears to be negative drift around 2009, then positive drift afterwards. Overall, values tend to be around the mean of 0. 
+
+**h)**
+```{r, tidy = TRUE}
+coeftest(model)
+```
+
+For all the coefficients, the p-values are statistically significant. The output confirms the significant of the autoregressive and seasonal terms in the model.  
+
+```{r, tidy = TRUE}
+Box.test(model$res, lag=12, type="Ljung-Box")
+```
+
+Since the p-value = 0.29 for the Ljung-Box test, we fail to reject the null and conclude that the residuals exhibit a white noise fit and captures the data's serial correlation.
+
+```{r, tidy = TRUE}
+qqnorm(as.numeric(model$res), main = "QQPlot")
+qqline(model$res, col = "red")
+```
+
+The QQ plot shows that the residuals tend to approximate a normal distribution, which is desirable.
+
+**i)**
+```{r, tidy = TRUE}
+model=Arima(diff(tn_ts),order=c(2,0,0),include.drift=TRUE,seasonal=list(order=c(1,0,1)))
+plot(forecast(model,h=12),shadecols="oldstyle", main = "Model Forecast")
+```
+
+**j)**
+```{r, tidy = TRUE}
+fit=auto.arima(diff(tn_ts))
+plot(forecast(fit,h=12),shadecols="oldstyle")
+```
+```{r, tidy = TRUE}
+mape(model$res, diff(tn_ts))
+mape(fit$res, diff(tn_ts))
+```
+
+My model performs better because the mean absolute percentage error is approximately 2.45%, which is lower than the 6.34% for the auto.arima model.
+
+**k)**
+```{r, tidy = TRUE}
+#generate forecasts
+forecast_model <- forecast(model, h = 12)
+forecast_fit <- forecast(fit, h = 12)
+
+#get the forecasted means from each model
+forecast_means_model <- forecast_model$mean
+forecast_means_fit <- forecast_fit$mean
+
+#calculate the average forecast at each forecast horizon
+average_forecast <- (forecast_means_model + forecast_means_fit) / 2
+
+#get the actual values for the forecast horizon of 12 steps ahead
+actual_values <- diff(tn_ts)[1:12]
+#calculate mape for the combined forecast
+mape_combined <- mape(average_forecast, actual_values)
+mape_combined
+```
+
+The combined forecast MAPE of 2.17% is better than the MAPE for the auto arima model and my model. This suggests that the combined forecast outperforms the two models individually.
+
+## (l) VAR Model
+
+```{r}
+# Combine into one data frame
+y=cbind(FL_ts,tn_ts)
+y_tot=data.frame(y)
+
+# Fit VAR model
+VARselect(y_tot, lag.max = 20)
+y_model=VAR(y_tot,p=13)
+
+plot(y_model)
+```
+
+Since AIC, HQ, and FPE all suggest a lag of 13, the order is fixed on the thirteenth lag. Residuals reverting to zero in a VAR model indicate that the residuals exhibit properties of a white noise process which is a desirable characteristic for a well-specified VAR model.
+
+## (m) Impulse Response Functions
+
+```{r}
+plot(irf(y_model, n.ahead=36))
+```
+
+The impact of a shock to imported goods in Florida has a positive and relatively constant effect on imported goods in Tennessee. The impact of a shock to imports in Tennessee has a very minimal impact on imported goods in Florida.
+
+## (n) Granger-Causality
+
+```{r}
+grangertest(tn_ts ~ FL_ts, order = 13)
+grangertest(FL_ts ~ tn_ts, order = 13)
+```
+
+Changes to imports in Florida appear to cause changes to imports in Tennessee as the p-value is very close to zero, but changes to imports in Tennessee do not cause changes to imports in Florida as the p-value exceeds 0.05.
+
+
+
+## (o) VAR Model Forecast
+
+```{r}
+var.predict=predict(object=y_model, n.ahead=12)
+plot(var.predict)
+plot(stability(y_model, type = "Rec-CUSUM"), plot.type="single")
+```
+
+The VAR forecast shows minimal variation in the data over the next 12 periods, similar to the ARIMA and ARMA forecasts.
+
+The recursive CUSUM plots for both Florida and Tennessee indicate that the VAR model is stable. While Florida’s plot shows a slight upward trend, it remains within the control limits (red bands). Tennessee’s plot stays close to zero, further supporting the model’s stability.
+
+
+
+# III. Conclusions and Future Work
+
+For our project, we built four models to predict imports in Florida and Tennessee: one with trend, seasonality, and cyclical components; an ARIMA model; a combined model; and a VAR model.
+
+The first model was an STL decomposition for trend and seasonal components and an ARMA model for cycles. We then fit an ARIMA model using auto.arima and a combined model. For Florida, the original model outperformed the ARIMA and combined models, but for Tennessee, the combined model performed best. Our final model involved fitting a VAR model of order 13, and we performed Granger-Causality tests to determine that Florida imports "cause" Tennessee imports but not the other way around.
+
+To improve our modeling in the future, we could have tried a changing weighting scheme for the combined model to see if the performance would have improved.
+
+
+
+# IV. References
+
+U.S. Census Bureau, Imports of Goods for Florida [IMPTOTFL], retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/IMPTOTFL, May 17, 2024.
+
+U.S. Census Bureau, Imports of Goods for Tennessee [IMPTOTTN], retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/IMPTOTTN, May 17, 2024.

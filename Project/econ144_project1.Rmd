@@ -1,0 +1,337 @@
+---
+title: "Project 1"
+author: "Mike Cai, Daniel Wang, Tiffany Mok, Jiyoon Kim"
+date: "2024-04-17"
+output: 
+  html_document:
+    fig_width: 10
+    fig_height: 8
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tseries)
+library(forecast)
+library(fpp3)
+library(tseries)
+library(seasonal)
+library(fable)
+library(stats)
+require(graphics)
+library(readxl)
+library(moments)
+library("fImport")
+#library(fOptions)
+#library(RQuantLib)
+library(nlstools)
+library(tseries)
+library(Quandl)
+library(zoo)
+library(PerformanceAnalytics)
+library(quantmod)
+library(car)
+library(FinTS)
+#library(fOptions)
+library(forecast)
+require(stats)
+#library(stockPortfolio)
+library(vars)
+library(tseries, quietly = T)
+library(forecast, quietly = T)
+library(XML)
+library(fBasics)
+library(timsac)
+library(TTR)
+library(lattice)
+library(foreign)
+library(MASS)
+require(stats4)
+library(KernSmooth)
+library(fastICA)
+library(cluster)
+library(leaps)
+library(mgcv)
+library(rpart)
+require("datasets")
+require(graphics)
+library(RColorBrewer)
+library(dynlm)
+library(readr)
+```
+
+## Q1
+
+# 1(a)
+```{r}
+amzn <- read.csv("AMZN.csv")
+mean <- mean(amzn$AdjClose)
+amzn_ts <- ts(amzn$AdjClose, start = 2019, end = 2024, frequency = 251)
+
+# Plot the time series
+plot(amzn_ts,xlab="Year", ylab="Amazon Stock Prices")
+abline(h = mean, col = "red")
+
+# Add legend
+legend("topright", legend = c("Stock Price", "Mean Stock Price"), 
+       col = c("black", "red"), lty = c(1, 1), lwd = c(1, 1))
+
+#tsdiaplay to display everything -  ACF - PACF - graph
+```
+
+# 1(b) 
+
+The plot in part (a) does not suggest that the data are covariance stationary. First of all, the data is not really mean-reverting, it crosses the mean only about 10 times over the span of five years, so the random variables don't all have the same mean. In addition, the variance of the data is also not constant, with the period of 2019-2020 having significantly less variance than the period of 2020-2024. 
+
+# 1(c)
+```{r}
+acf(amzn_ts, main = "ACF of Amazon Stock Prices")
+pacf(amzn_ts, main = "PACF of Amazon Stock Prices")
+```
+From the graph, we can see that the ACF of all lags are all positive and over the band, meaning that the stock price today does depend on stock price in previous time steps. However, the PACF of all lags are all contained within the band(except when it is conducting PACF with itself), meaning that if we removed all time steps in the middle, the two stock prices at two seperate times are not that related. Also, there does not seem to be any seasonality shown in ACF and PACF as there is no obvious spikes taller than other lags in both graphs. 
+
+# 1(d)
+```{r}
+t <- time(amzn_ts)
+t <- as.numeric(t)
+
+#fit linear model
+amzn_linear <- lm(amzn_ts ~ t)
+summary(amzn_linear)
+
+#plot linear model
+plot(amzn_ts, main="Time Series - Linear Model")
+lines(t, amzn_linear$fitted.values, col="red")
+
+#fit quadratic + periodic model
+amzn_qp <- lm(amzn_ts ~ t + I(t^2) + sin(2*pi*t/251) + cos(2*pi*t/251)) # Decided to divide by 251 within the sin and cos functions  to adjust the periodic cycles by the number of trading days in a year for better fit
+summary(amzn_qp)
+
+#plot non-linear model
+plot(amzn_ts, main="Time Series - Quadratic + Periodic Model")
+lines(t, amzn_qp$fitted.values, col="red")
+summary(amzn_ts)
+```
+# 1(e)
+```{r}
+
+# Create a data frame for linear model residuals vs fitted values
+linear_resid_data <- data.frame(
+  Fitted_Values = amzn_linear$fitted.values,
+  Residuals = amzn_linear$residuals
+)
+
+# Create a data frame for quadratic plus periodic model residuals vs fitted values
+qp_resid_data <- data.frame(
+  Fitted_Values = amzn_qp$fitted.values,
+  Residuals = amzn_qp$residuals
+)
+
+# Create plots using ggplot2 for better aesthetics
+
+# Plot for linear model residuals 
+ggplot(linear_resid_data, aes(x = Fitted_Values, y = Residuals)) +
+  geom_point(color = 'blue', alpha = 0.7) +
+  geom_hline(yintercept = 0, color = 'red', linetype = 'dashed') +
+  labs(
+    x = "Fitted Values",
+    y = "Residuals",
+    title = "Residuals vs Fitted Values - Linear Model"
+  ) +
+  theme_minimal()
+
+# Plotfor quadratic + periodic model residuals 
+ggplot(qp_resid_data, aes(x = Fitted_Values, y = Residuals)) +
+  geom_point(color = 'green', alpha = 0.7) +
+  geom_hline(yintercept = 0, color = 'red', linetype = 'dashed') +
+  labs(
+    x = "Fitted Values",
+    y = "Residuals",
+    title = "Residuals vs Fitted Values - Quadratic + Periodic Model"
+  ) +
+  theme_minimal()
+
+
+# par(mfrow=c(2,1))
+# plot(amzn_ts, main="Time Series - Linear Model", ylab = "Amazon Stock Price", xlab="Time",lwd=2, col='skyblue3')
+# lines(t,amzn_linear$fitted.values,col="red3",lwd=2)
+# plot(t,amzn_linear$res, ylab="Residuals",type='l',xlab="Time")
+
+# par(mfrow=c(2,1))
+# plot(amzn_ts, main="Time Series - Quadratic Model", ylab = "Amazon Stock Price", xlab="Time",lwd=2, col='skyblue3')
+# lines(t,amzn_qp$fitted.values,col="red3",lwd=2)
+# plot(t,amzn_qp$res, ylab="Residuals",type='l',xlab="Time")
+```
+The linear model's residual is not random, but instead follow a w-shaped pattern where it first underpredicts, and then over predicts, but at the end under predicts again. Thus it's likely that the linear model fit is heteroskedastic. The shape of the residual suggest that there might be some cycle present in our data. The quadratic model's residual is more randomized, but there is still some downward linear trend present. Overall, the residuals of linear model is slightly more variant than the residuals of quadratic model in the past five years, since for the linear model, the residuals fluctuates between -60 and 60, but for the quadratic model, most residuals fluctuates between -50 and 25.  
+
+# 1(f)
+```{r}
+# Histogram of residuals for linear model
+hist(amzn_linear$res)
+
+# Histogram of residuals for quadratic+periodic model
+hist(amzn_qp$res)
+```
+A good residual histogram plot should look similar to the normal distribution. For the linear model, the histogram is bi-modal, so it deviates a lot from the normal distribution and thus it's not a good model for fitting stock price. For the quadratic model, the uni-modal histogram looks similar to a normal distribution, but is skewed to the left.  
+
+# 1(g)
+```{r}
+summary(amzn_linear)
+summary(amzn_qp)
+```
+Linear model: All p-values for t and f-statistics are less than 0.05 for the coefficients of the linear model. Thus the model overall and each of the individual coefficients are statistically significant. The model's multiple R-squared value of 0.082, very close to zero, indicates that the linear model does not explain the variation in stock prices very well.
+
+Quadratic+Periodic model: Note that the cosine part of the model has NA estimates since it is perfectly collinear with the sine p-art of the model. All p-values for t and f-statistics are less than 0.05 for the coefficients of the quadratic-periodic model. A multiple R-squared value of 0.5916 is closer to one than zero, suggesting a moderately good fit for the model.
+
+# 1(h)
+```{r}
+aic <- AIC(amzn_linear, amzn_qp)
+aic
+bic <- BIC(amzn_linear, amzn_qp)
+bic
+```
+The AIC and BIC models agree. The quadratic + periodic model is the better fit since it has lower values.
+
+# 1(i)
+```{r, warning = FALSE}
+# Plot the original amzn_ts
+tn <- data.frame(t = seq(2024, 2025 + 1/12, by = 1/12))  # Forecasting 12 months ahead
+
+# Predict using the quadratic plus periodic model (amzn_qp)
+pred <- predict(amzn_qp, tn, se.fit = TRUE)  # Predict with the model, including standard errors
+
+# Include prediction intervals (95%)
+pred.plim <- predict(amzn_qp, tn, level = 0.95, interval = "prediction")  # Prediction interval
+pred.clim <- predict(amzn_qp, tn, level = 0.95, interval = "confidence")  # Confidence interval
+
+plot(amzn_ts, xlim = c(2019, 2025 + 1/12), ylim = c(min(amzn_ts, pred.plim[, 2]), max(amzn_ts, pred.plim[, 3])),
+     type = "l", lwd = 2, ylab = "Amazon Stock Price", xlab = "Time")
+
+# Add the predicted values and intervals as lines
+lines(t, amzn_qp$fitted.values, col="red")
+lines(tn$t, pred$fit, col = "blue", lwd = 2)  # Predicted values
+lines(tn$t, pred.plim[, 2], col = "green", lty = 2)  # Prediction interval lower bound
+lines(tn$t, pred.plim[, 3], col = "green", lty = 2)  # Prediction interval upper bound
+lines(tn$t, pred.clim[, 2], col = "purple", lty = 3)  # Confidence interval lower bound
+lines(tn$t, pred.clim[, 3], col = "purple", lty = 3)  # Confidence interval upper bound
+
+# Add legend
+legend("topleft", legend = c("Original Data", "Predicted Values", "Prediction Interval", "Confidence Interval"),
+       col = c("black", "blue", "green", "purple"), lty = c(1, 1, 2, 2, 3, 3), lwd = 2)
+```
+
+## Q2
+
+# 2(a)
+```{r}
+# Decompose the time series
+amzn_dcmp <- decompose(amzn_ts, "additive")
+
+# Plot the decomposition
+plot(amzn_dcmp)
+
+# Store the individual components
+trend_amzn <- amzn_dcmp$trend
+# plot(trend_amzn, main = "Trend Component of Amazon Stock Prices")
+
+seasonal_amzn <- amzn_dcmp$seasonal
+# plot(seasonal_amzn, main = "Seasonal Component of Amazon Stock Prices")
+
+random_amzn <- amzn_dcmp$random
+# plot(random_amzn, main = "Random Component of Amazon Stock Prices")
+
+# Detrend: Y - T
+# detrend_amzn <- amzn_ts - trend_amzn
+# autoplot(detrend_amzn, main = "Detrended Amazon Stock Prices")
+
+# Seasonally Adjust: Y - S
+# seasonally_adjusted_amzn <- amzn_ts - seasonal_amzn
+# autoplot(seasonally_adjusted_amzn, main = "Seasonally Adjusted Amazon Stock Prices")
+
+# Remove the Random Component: Y - R
+# cycles_adjusted_amzn <- amzn_ts - random_amzn
+# autoplot(cycles_adjusted_amzn, main = "Cycles Adjusted Amazon Stock Prices")
+
+# Detrend and Seasonally Adjust the Series: Y - T - S
+detrend_seas_adj_amzn <- amzn_ts - trend_amzn - seasonal_amzn
+autoplot(detrend_seas_adj_amzn, main = "Detrended and Seasonally Adjusted Amazon Stock Prices")
+
+# Check if the remainder is consistent with white noise
+tsdisplay(detrend_seas_adj_amzn, lag.max = 20, main = "Residual Analysis")
+```
+From the graphs, we can see the trend is quite quadratic. There appears to be some seasonality in the data, but is definitely not apparent. The residuals probably have some cycles in it, but the cycles are not apparent. The ACF of all lags are all positive and over the band, meaning that the residuals today does depend on stock price in previous time steps. Also ACF is declining, meaning that the longer the time gap, the weaker the relationship between residuals today and residuals at that time step. However, the PACF of all lags are all contained within the band(except when it is conducting PACF with itself), meaning that if we removed all time steps in the middle, the two residuals at two seperate times are not that related. Also, there does not seem to be any seasonality shown in ACF and PACF as there is no obvious spikes taller than other lags in both graphs.
+
+# 2(b)
+```{r}
+#perform multiplicative decomposition
+amzn_dcmp2 <- decompose(amzn_ts, "multiplicative")
+
+#plot multiplicative decomposition
+autoplot(amzn_dcmp2)
+
+#remove the trend and seasonality
+trend_amzn2 <- amzn_dcmp2$trend
+detrend_amzn2 <- amzn_ts/trend_amzn2
+seasonal_amzn2 <- amzn_dcmp2$seasonal
+seasonally_adjusted_amzn2 <- amzn_ts/seasonal_amzn2
+
+#detrended and seasonally adjusted series
+detrend_seas_adj_amzn2 <- amzn_ts/amzn_dcmp2$trend/amzn_dcmp2$seasonal
+autoplot(detrend_seas_adj_amzn2, main = "Detrended and Seasonally Adjusted Amazon Stock Prices - Multiplicative")
+
+#compute residuals
+residuals_amzn2 <- amzn_ts / (trend_amzn2 * seasonal_amzn2)
+
+# Plot ACF and PACF of residuals
+tsdisplay(residuals_amzn2, lag.max = 20, main = "ACF and PACF of Residuals - Multiplicative")
+```
+The multiplicative decomposition of the time series look pretty much exactly the same as the additive decomposition. This is due to the amazon stock price's unstable volatility, sometimes increasing but sometimes decreasing.Thus, we can probably say that both additive and multiplicative decomposition does not fit the amazon stock prices that well. Again,the trend is quite quadratic. There doesn't seem to be any seasonality in the data, and the residuals probably have some cycles in it, but the cycles are not apparent. The ACF of all lags are all positive and over the band, meaning that the residuals today does depend on stock price in previous time steps. Also ACF is declining, meaning that the longer the time gap, the weaker the relationship between residuals today and residuals at that time step. However, the PACF of all lags are all contained within the band(except when it is conducting PACF with itself), meaning that if we removed all time steps in the middle, the two residuals at two seperate times are not that related. Also, there does not seem to be any seasonality shown in ACF and PACF as there is no obvious spikes taller than other lags in both graphs.  
+
+# 2(c) 
+
+Both the additive and multiplicative decomposition appear to be the same. Analyzing the ACF and PACF plots, there are no noticeable differences. The residual plots show very similar structures too. Therefore, we cannot conclude that one is better than the other.
+
+# 2(d) 
+
+The models for the cycles would be different. This is due to the range of the random component of the additive decomposition being much larger, indicating that the magnitude of the random fluctuations are more pronounced. There are less random fluctuations in the multiplicative decomposition, so the cyclical pattern would be more stable and predictable.
+
+# 2(e)
+```{r }
+#Plot the seasonal factors:
+fit=tslm(amzn_ts ~ season+0)
+plot(fit$coef,type='l',ylab='Seasonal Factors', xlab="Season",lwd=2, main="Plot of Seasonal Factors")
+```
+Overall, the seasonal factors seem to display an increasing trend over time. There are noticeable dips in seasonal factors around days 50, 100, and 200, with sharp increases between 50 and 75 and 100 and 150.  The seasonal effects are minimal on day 50 and reach its peak around day 150, followed by a decline thereafter. This pattern suggests a potential link to the 150-day moving average trading strategy.  Traders who use this strategy may have sold their Amazon stock around day 150, contributing to the downward pressure on the stock price.
+
+
+
+# 2(f)
+```{r}
+# Forecast with trend and seasonality:
+fit3= tslm(amzn_ts ~ trend + season)
+plot(forecast(fit3,h=12),main="Model 3: Forecast Trend + Seasonality")
+lines(fit3$fitted.values, col="red") #automatically overlay model with forecast - see the forecast with the actual data - continuous pattern
+
+# Seasonal decomposition and naive forecast
+# fit <- stl(amzn_ts, t.window=13, s.window="periodic",
+  # robust=TRUE)
+
+# fit %>% seasadj() %>% naive() %>%
+  # autoplot() + ylab("New orders index") +
+  # ggtitle("Naive forecasts of seasonally adjusted data")
+
+# Naive forecast without seasonal decomposition
+ # fit %>% forecast(method="naive") %>%
+  # autoplot() + ylab("New orders index")
+```
+
+# Conclusion and Future Work
+
+Based on our final model, we can conclude that Amazon stock prices will be rising. This makes sense because of Amazon's strong market performance and dominance over the digital e-commerce industry. The forecast looks accurate and appears to show an upward trend and seasonality. Overall, stock price might not be an effective time series to implement linear or quadratic + periodic fitting, and the additive or multiplicative decomposition also yields very similar results, implying the series might be not additive or multiplicative. We can improve the model by trying to lessen the uncertainty of the forecast. Additionally, it is important to note that stock prices are constantly changing. While our model predicts forecasts from the beginning of 2024 onward, it would be a good idea to regularly add in new data so that our model can make the most accurate predictions. Next time, we can possibly select a time series that exhibits more apparent seasonality.
+
+## References
+
+1. https://finance.yahoo.com/quote/AMZN
+2. https://en.wikipedia.org/wiki/Amazon_(company)
+
+
+
